@@ -79,7 +79,7 @@ processes stop too; again after 3s → kill -9) · `X` kill -9 now. A process th
 kill -9 gets an explanation: a **zombie** (already dead, waiting for its parent) or stuck in
 the kernel (**D-wait**). Rows also flag `paused` (Ctrl-Z) processes.
 
-**Processes:** `space` keep · `s` sort (started, memory, CPU, name) · `S` flip direction ·
+**Processes:** `space` keep · `s` sort, then `t` started · `m` memory · `c` CPU · `n` name · `r` reverse ·
 `a` show app & system servers · `/` filter · `tab` Kept · `?` help. Sorting applies at every
 level: apps and directories by their totals, jobs, and processes within a job; it's remembered
 in `~/.config/running/settings.json`.

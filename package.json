@@ -1,6 +1,6 @@
 {
   "name": "running",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "See what is running across all your terminals, keep what matters, start it again.",
   "type": "module",
   "private": true,
@@ -8,7 +8,7 @@
     "dev": "bun src/main.tsx",
     "typecheck": "tsc --noEmit -p .",
     "build": "bun build --compile --minify src/main.tsx --outfile dist/running",
-    "install-bin": "bun run build && cp dist/running ~/.local/bin/running"
+    "install-bin": "bun run build && rm -f ~/.local/bin/running && cp dist/running ~/.local/bin/running"
   },
   "devDependencies": {
     "@types/bun": "latest",

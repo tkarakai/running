@@ -79,6 +79,7 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
   const [filter, setFilter] = useState("");
   const [filtering, setFiltering] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [sortMenu, setSortMenu] = useState(false); // `s` pressed: the next key picks the sort
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [peekData, setPeekData] = useState<Peek | null>(null);
   const [status, setStatus] = useState<{ text: string; tone: "ok" | "warn" | "err" } | null>(null);
@@ -403,6 +404,19 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
 
   useInput(
     (input, key) => {
+      if (sortMenu) {
+        setSortMenu(false);
+        if (input === "r") {
+          setSort((s) => ({ ...s, desc: !s.desc }));
+          return flash(`sorted by ${SORTS[sort.key].label} — ${SORTS[sort.key].dirLabel[sort.desc ? 0 : 1]}`);
+        }
+        const pick = (Object.keys(SORTS) as SortKey[]).find((k) => SORTS[k].key === input);
+        if (pick) {
+          setSort({ key: pick, desc: SORTS[pick].desc });
+          return flash(`sorted by ${SORTS[pick].label} — ${SORTS[pick].dirLabel[SORTS[pick].desc ? 1 : 0]}`);
+        }
+        return; // esc or any other key: leave the sort as it is
+      }
       if (confirm) {
         if (input === "y" || input === "Y") confirm.onYes();
         setConfirm(null);
@@ -463,16 +477,7 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
 
       if (mode === "procs") {
         if (input === "a") { setShowAll((s) => !s); return flash(showAll ? "hiding app & system servers" : "showing app & system servers too"); }
-        if (input === "s") {
-          const keys = Object.keys(SORTS) as SortKey[];
-          const next = keys[(keys.indexOf(sort.key) + 1) % keys.length]!;
-          setSort({ key: next, desc: SORTS[next].desc });
-          return flash(`sorted by ${SORTS[next].label} — ${SORTS[next].dirLabel[SORTS[next].desc ? 1 : 0]}  (S flips)`);
-        }
-        if (input === "S") {
-          setSort((s) => ({ ...s, desc: !s.desc }));
-          return flash(`sorted by ${SORTS[sort.key].label} — ${SORTS[sort.key].dirLabel[sort.desc ? 0 : 1]}`);
-        }
+        if (input === "s") { setStatus(null); return setSortMenu(true); }
         if (curRow && input === " ") {
           const k = keptOf(curRow);
           if (k) return flash(`already kept as "${k.name}" — edit it in the Kept tab`, "warn");
@@ -642,7 +647,7 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
       {header}
       <Text> </Text>
       {body}
-      <Footer width={W} mode={mode} overlay={overlay?.type} confirm={confirm} status={status} filtering={filtering} row={curRow} child={curChild} probes={probes} open={!!curRow && expanded.has(curRow.pid)} />
+      <Footer width={W} mode={mode} overlay={overlay?.type} sortMenu={sortMenu ? sort : null} confirm={confirm} status={status} filtering={filtering} row={curRow} child={curChild} probes={probes} open={!!curRow && expanded.has(curRow.pid)} />
     </Box>
   );
 }
@@ -1109,7 +1114,7 @@ function HelpView(props: { width: number; height: number }) {
             ["space", "keep it"],
             ["R", "restart: stop, then run it again (same terminal if possible)"],
             ["a", "also show app & system servers (dimmed)"],
-            ["s / S", "sort: started, memory, CPU, name / flip direction"],
+            ["s …", "sort: then t started, m memory, c CPU, n name, r reverse"],
           ])}
         </Box>
         <Box flexDirection="column">
@@ -1152,7 +1157,28 @@ function Empty({ mode, loading, filtered }: { mode: Mode; loading: boolean; filt
 function Footer(props: {
   width: number; mode: Mode; overlay?: Overlay["type"]; filtering: boolean; row?: Row; child?: Member; probes: Probes; open: boolean;
   confirm: Confirm | null; status: { text: string; tone: "ok" | "warn" | "err" } | null;
+  sortMenu: { key: SortKey; desc: boolean } | null;
 }) {
+  if (props.sortMenu) {
+    const cur = props.sortMenu;
+    return (
+      <Text wrap="truncate">
+        <Text color={c.accent} bold> sort by: </Text>
+        {(Object.keys(SORTS) as SortKey[]).map((k) => (
+          <Text key={k}>
+            <Text color={c.accent} bold> {SORTS[k].key}</Text>
+            <Text color={k === cur.key ? c.fg : c.dim} bold={k === cur.key}> {SORTS[k].label}{k === cur.key ? " ✓" : ""} </Text>
+          </Text>
+        ))}
+        <Text color={c.faint}>  ·  </Text>
+        <Text color={c.accent} bold>r</Text>
+        <Text color={c.dim}> reverse (now: {SORTS[cur.key].dirLabel[cur.desc ? 1 : 0]})</Text>
+        <Text color={c.faint}>  ·  </Text>
+        <Text color={c.accent}>esc</Text>
+        <Text color={c.dim}> cancel</Text>
+      </Text>
+    );
+  }
   if (props.confirm)
     return (
       <Text wrap="truncate">

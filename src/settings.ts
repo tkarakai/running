@@ -7,6 +7,7 @@ export type SortKey = "started" | "memory" | "cpu" | "name";
 
 interface SortSpec {
   label: string;
+  key: string; // the key that picks it in the sort menu (after `s`)
   desc: boolean; // natural direction when first selected
   dirLabel: [asc: string, desc: string];
   /** How groups (apps, directories) are ordered: by total, by their biggest job, or by name. */
@@ -16,10 +17,10 @@ interface SortSpec {
 
 export const SORTS: Record<SortKey, SortSpec> = {
   // `age` is seconds since start: ascending age = newest first, so "oldest first" is descending.
-  started: { label: "started", desc: true, dirLabel: ["newest first", "oldest first"], group: "label", value: (x) => x.age },
-  memory: { label: "memory", desc: true, dirLabel: ["smallest first", "largest first"], group: "sum", value: (x) => x.rss },
-  cpu: { label: "CPU", desc: true, dirLabel: ["idlest first", "busiest first"], group: "sum", value: (x) => x.cpu },
-  name: { label: "name", desc: false, dirLabel: ["A → Z", "Z → A"], group: "label", value: (x) => x.name.toLowerCase() },
+  started: { label: "started", key: "t", desc: true, dirLabel: ["newest first", "oldest first"], group: "label", value: (x) => x.age },
+  memory: { label: "memory", key: "m", desc: true, dirLabel: ["smallest first", "largest first"], group: "sum", value: (x) => x.rss },
+  cpu: { label: "CPU", key: "c", desc: true, dirLabel: ["idlest first", "busiest first"], group: "sum", value: (x) => x.cpu },
+  name: { label: "name", key: "n", desc: false, dirLabel: ["A → Z", "Z → A"], group: "label", value: (x) => x.name.toLowerCase() },
 };
 
 export interface Settings {

@@ -3,6 +3,17 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
+## 0.5.1 — 2026-11-08
+
+### Changed
+- Sorting is a menu instead of cycling: `s` shows the options in the footer, then `t` started,
+  `m` memory, `c` CPU, `n` name, `r` reverse the current order, `esc` cancel. `S` is gone.
+
+### Fixed
+- `bun run install-bin` could leave a binary that macOS kills on launch (exit 137): it copied
+  over the old file in place, and macOS keeps a cached code signature per file. It now
+  removes the old binary first.
+
 ## 0.5.0 — 2026-11-08
 
 ### Added
