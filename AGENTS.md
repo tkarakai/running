@@ -1,113 +1,43 @@
-Default to using Bun instead of Node.js.
+# running — notes for coding agents
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun check` instead of `tsc --noEmit`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+`running` is a macOS terminal UI (Bun + TypeScript + Ink) that lists the processes a person
+started across their terminals, keeps the ones worth remembering, and starts, restarts,
+focuses, peeks at and stops them. See `README.md` for behavior and `CHANGELOG.md` for history.
 
-## APIs
+## Workflow (required)
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+- **Never commit to `main` directly.** Branch (`feat/…`, `fix/…`), open a pull request, let CI
+  pass, squash-merge. The PR title becomes the commit title on `main`.
+- **One agent per checkout.** If `git status` shows changes you didn't make, stop and ask —
+  another session may be working here.
+- Add user-visible changes to `## Unreleased` in `CHANGELOG.md` in the same PR.
+- Don't bump the version in feature PRs; that happens in a release PR.
 
-## Testing
+## Releases
 
-Use `bun test` to run tests.
+1. Release PR: bump `version` in `package.json`, rename `## Unreleased` in `CHANGELOG.md` to
+   `## X.Y.Z — YYYY-MM-DD`, merge it.
+2. On an up-to-date, clean `main`: `bun run release` (try `bun run release --dry-run` first).
+   It checks everything, runs typecheck + tests, builds the binary, tags `vX.Y.Z`, and
+   creates the GitHub release with the CHANGELOG section as notes and the macOS binary
+   attached.
+3. `bun run install-bin` to install it locally.
 
-```ts#index.test.ts
-import { test, expect } from "bun:test";
+## Working on the code
 
-test("hello world", () => {
-  expect(1).toBe(1);
-});
-```
+- macOS only: `src/native.ts` calls libSystem through `bun:ffi`. CI tests run on macOS.
+- `bun run typecheck`, `bun test`, `bun run build` (single binary in `dist/`).
+- Verify UI changes in a real terminal: run it in a detached tmux session
+  (`tmux new-session -d -s t -x 180 -y 34 "bun src/main.tsx"`), drive it with
+  `tmux send-keys`, read it with `tmux capture-pane -p`. Use `RUNNING_CONFIG_DIR` and
+  `RUNNING_LOG_FILE` pointing at a temp dir so tests don't touch the user's kept list or log.
+- Never kill, restart or type into the user's own processes or terminals while testing —
+  start your own test processes.
+- `bun run install-bin` removes the old binary before copying (copying over it in place gets
+  the new one killed by macOS: cached code signature).
 
-## Type checking
+## Bun
 
-Use `bun check` to type check the project. It reads `tsconfig.json` and reports the same errors as `tsc`.
-
-- `bun check src/index.ts` checks one file and what it imports
-- `bun --check src/index.ts`, `bun test --check` and `bun build --check` type check first, and do nothing else if there is an error
-
-## Frontend
-
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
-
-Server:
-
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
-```
-
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
-
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
-```
-
-With the following `frontend.tsx`:
-
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
-
-```sh
-bun --hot ./index.ts
-```
-
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+- Use `bun <file>`, `bun test`, `bun install`, `bun run <script>`, `bunx <pkg>` — not node,
+  jest/vitest, npm/yarn/pnpm or npx.
+- Prefer Bun built-ins: `bun:sqlite`, `Bun.spawn`, `Bun.which`, `Bun.file`.

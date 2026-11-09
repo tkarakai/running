@@ -116,10 +116,19 @@ For `codex`, `claude` and `pi` rows, `running` reads the harness's local session
 `p` → `←→` shows the recent conversation; keeping an agent saves its resume command;
 `R` resumes the same conversation.
 
-## Versioning
+## Development & releases
 
-Bump `version` in `package.json`, add a section to `CHANGELOG.md`, commit, tag `vX.Y.Z`,
-then `bun run install-bin`.
+Repository: [github.com/tkarakai/running](https://github.com/tkarakai/running) (private).
+Changes go through pull requests (squash-merged, CI must pass); see [`AGENTS.md`](AGENTS.md).
+
+Versions follow semver and are released with GitHub releases:
+
+1. Release PR: bump `version` in `package.json` and turn `## Unreleased` in
+   [`CHANGELOG.md`](CHANGELOG.md) into `## X.Y.Z — YYYY-MM-DD`; merge it.
+2. On an up-to-date `main`: `bun run release --dry-run`, then `bun run release` — tags
+   `vX.Y.Z` and publishes the GitHub release (CHANGELOG section as notes, macOS binary
+   attached).
+3. `bun run install-bin` to install it.
 
 ## Data
 

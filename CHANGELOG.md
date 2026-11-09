@@ -3,6 +3,13 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
+## Unreleased
+
+### Development
+- Hosted on GitHub (private): pull-request workflow, CI on macOS (typecheck, tests, binary
+  build) plus secret scanning and workflow linting, Dependabot, and `bun run release` for
+  tagged GitHub releases with the binary attached.
+
 ## 0.5.1 — 2026-11-08
 
 ### Changed
