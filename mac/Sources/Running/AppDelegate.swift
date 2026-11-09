@@ -5,7 +5,7 @@ import SwiftUI
 /// icon (LSUIElement). The main menu isn't visible, but its key equivalents still work while
 /// the window is key — that's where the ⌘ shortcuts live.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate, NSMenuItemValidation {
     let store = Store()
     let ui = UIState()
     private var statusItem: NSStatusItem!

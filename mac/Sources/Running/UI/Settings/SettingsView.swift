@@ -55,7 +55,11 @@ struct SettingsView: View {
                         }
                     }
                     LabeledContent("Kept processes") {
-                        Button(Fmt.tildify(h.keptFile)) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: h.keptFile)]) }.buttonStyle(.link)
+                        Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: h.keptFile)]) } label: {
+                            Text(Fmt.tildify(h.keptFile)).lineLimit(1).truncationMode(.middle)
+                        }
+                        .buttonStyle(.link)
+                        .help("Show in Finder — plain YAML, safe to edit by hand")
                     }
                     LabeledContent("Command log file") { Text(Fmt.tildify(h.logFile)).textSelection(.enabled).foregroundStyle(.secondary) }
                 } else {

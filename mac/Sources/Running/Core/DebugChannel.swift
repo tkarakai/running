@@ -105,7 +105,7 @@ enum DebugChannel {
         case "dump":
             var out: [String: Any] = ["sidebar": "\(delegate.ui.sidebarVisibility)", "inspectorPref": delegate.store.prefs.inspectorShown, "route": "\(delegate.ui.route)",
                                       "selection": "\(String(describing: delegate.store.selection))", "rows": delegate.store.rows.count, "toast": delegate.store.toast?.text ?? "",
-                                      "confirm": delegate.store.confirmation?.title ?? "", "kept": delegate.store.kept.map(\.name)]
+                                      "confirm": delegate.store.confirmation?.title ?? "", "error": delegate.store.lastError ?? "", "fatal": delegate.store.fatal ?? "", "hello": delegate.store.hello?.version ?? "", "kept": delegate.store.kept.map(\.name)]
             if let w = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
                 out["frame"] = NSStringFromRect(w.frame)
                 func walk(_ v: NSView, _ d: Int) -> [String] {

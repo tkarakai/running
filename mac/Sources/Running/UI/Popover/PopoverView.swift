@@ -188,14 +188,15 @@ struct PopoverView: View {
     var footer: some View {
         HStack(spacing: 10) {
             Button { openWindow(nil, nil) } label: {
-                Label("Open Running", systemImage: "macwindow")
+                Label("Open", systemImage: "macwindow").fixedSize()
             }
             .buttonStyle(.borderless)
             .keyboardShortcut("o", modifiers: .command)
             .help("Open the Running window (⌘O)")
+            .layoutPriority(1)
             Spacer()
-            HStack(spacing: 4) { Kbd("⏎"); Text("open"); Kbd("⌘⏎"); Text("details"); Kbd("⌘⌫"); Text("stop") }
-                .font(.caption2).foregroundStyle(.tertiary)
+            HStack(spacing: 4) { Kbd("⏎"); Text("open"); Text("·"); Kbd("⌘⏎"); Text("details"); Text("·"); Kbd("⌘⌫"); Text("stop") }
+                .font(.caption2).foregroundStyle(.tertiary).lineLimit(1).fixedSize()
             Spacer()
             Menu {
                 Button("Settings…") { openWindow(nil, .settings) }
@@ -242,6 +243,7 @@ struct PopoverJobRow: View {
                     if k != nil { Image(systemName: "bookmark.fill").font(.system(size: 9)).foregroundStyle(.green) }
                     Text(store.name(of: j)).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.tail)
                         .foregroundStyle(k != nil ? Color.green : Color.primary)
+                        .help(store.name(of: j))
                 }
                 Text(Fmt.tildify(j.cwd)).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
             }
@@ -255,7 +257,7 @@ struct PopoverJobRow: View {
                 }
                 .transition(.opacity)
             } else {
-                if let a = j.agent { AgentBadge(agent: a) }
+                if let a = j.agent, a.status == "working" || a.status == "new" { AgentBadge(agent: a).fixedSize() }
                 PortChips(listen: j.listen, max: 1, compact: true).fixedSize()
                 StateCell(stat: j.stat, etime: j.etimeSec, stop: store.stopping[j.pid], busy: store.busy.contains(j.pid))
                     .font(.caption)

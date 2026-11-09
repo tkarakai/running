@@ -3,6 +3,32 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
+## Unreleased
+
+### Added
+- **Running.app**, a desktop twin of the TUI for Apple silicon Macs on macOS 26 (Tahoe) or
+  later: a menu bar app (no Dock icon) with a quick panel (**⌃⌥R** from anywhere) and a
+  resizable window — sidebar, grouped process list, inspector with details, live output,
+  CPU/memory sparklines and agent stats. Everything the TUI does: keep, edit, forget (with
+  undo), start, restart, stop / force-kill, focus a terminal, open web pages, peek at output,
+  sort, filter, show app servers. TUI keys work in the list, plus Mac shortcuts, right-click
+  menus and buttons. It shares the kept list, sort order and command log with the TUI.
+  Released as `Running-X.Y.Z-arm64.dmg` alongside the terminal builds.
+- Kept processes can be started in a new Ghostty, iTerm2, Terminal or tmux window (the app;
+  the command is typed into the new shell, so it's in your history and the command log).
+- Focus (`f`) switches to the right Ghostty tab, matched by its tty (it used to only bring
+  Ghostty to the front).
+
+### Fixed
+- A refresh could hang while something was kept and a sandboxed app extension (Tailscale's
+  network extension) was running: comparing directories resolved paths inside other apps'
+  containers, which macOS can block on. Those are never looked into now.
+
+### Development
+- `src/serve.ts`: the engine behind a JSON-lines protocol, for the app (`running-core`).
+- `mac/`: the Swift package; `bun run build:app` (`--dmg`), `bun run install-app`,
+  `bun run test:app`. CI builds and tests the app; `bun run release` attaches the disk image.
+
 ## 0.6.0 — 2026-11-08
 
 ### Added

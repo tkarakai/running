@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { readFileSync, statSync } from "node:fs";
 import { procArgs, procCwd, procPath, procStart } from "./native.ts";
 import { historyBetween, readLog, termForTty, typedFor, type Typed } from "./hook.ts";
+import { isAppContainer } from "./fingerprint.ts";
 
 export type Kind = "term" | "server" | "daemon" | "app";
 
@@ -512,6 +513,7 @@ const branchCache = new Map<string, { at: number; branch: string | null }>();
 
 /** Git branch of the repo (or worktree) containing `dir`, or a short sha when detached. */
 export function gitBranch(dir: string): string | null {
+  if (isAppContainer(dir)) return null;
   const hit = branchCache.get(dir);
   if (hit && Date.now() - hit.at < 10_000) return hit.branch;
   let branch: string | null = null;

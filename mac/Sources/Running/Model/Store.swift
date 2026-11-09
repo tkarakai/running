@@ -40,6 +40,7 @@ final class Store {
     var loaded = false
     var fatal: String?
     var lastRefresh: Date?
+    var lastError: String?
 
     // ── view state shared between the window and the popover ──
     var query = ""
@@ -59,6 +60,7 @@ final class Store {
     var popoverVisible = false { didSet { reschedule() } }
 
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var engineStarted = false
     @ObservationIgnored private var refreshing = false
     @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var toastTask: Task<Void, Never>?
@@ -77,6 +79,7 @@ final class Store {
             let env = LoginEnvironment.resolve()
             core.start(environment: env)
             await MainActor.run {
+                self.engineStarted = true
                 Task { await self.loadHello(); await self.refresh() }
                 self.reschedule()
             }
@@ -113,6 +116,7 @@ final class Store {
     }
 
     func refresh() async {
+        guard engineStarted else { return }
         if refreshing { refreshAgain = true; return }
         refreshing = true
         defer { refreshing = false }
@@ -123,7 +127,8 @@ final class Store {
                 apply(s)
                 fatal = nil
             } catch {
-                if loaded { flash("refresh failed: \(error.localizedDescription)", .err) }
+                lastError = "\(error)"
+                if loaded { flash("Refresh failed: \(error.localizedDescription)", .err) }
             }
         } while refreshAgain
     }

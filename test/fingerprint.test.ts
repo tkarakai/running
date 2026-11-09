@@ -41,3 +41,13 @@ test("shell words and session ids", () => {
   expect(parseCommand("FOO=1 BAR='x y' /bin/tool run x").env).toEqual({ FOO: "1", BAR: "x y" });
   expect([...sessionIds("claude --resume 8B52D472-1EDF-448B-9A7E-14D80FDFA58D")]).toEqual(["8b52d472-1edf-448b-9a7e-14d80fdfa58d"]);
 });
+
+test("app sandbox containers are never resolved (macOS can block on them)", () => {
+  const { sameDir, isAppContainer } = require("../src/fingerprint.ts");
+  const c = "/Users/me/Library/Containers/io.tailscale.ipn.macos.network-extension/Data";
+  expect(isAppContainer(c)).toBe(true);
+  expect(isAppContainer("/Users/me/Library/Group Containers/x/y")).toBe(true);
+  expect(isAppContainer("/Users/me/dev/app")).toBe(false);
+  expect(sameDir(c, c)).toBe(true);
+  expect(sameDir("/tmp", c)).toBe(false);
+});
