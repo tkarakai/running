@@ -1,0 +1,26 @@
+{
+  "name": "running",
+  "version": "0.3.0",
+  "description": "See what is running across all your terminals, keep what matters, start it again.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun src/main.tsx",
+    "typecheck": "tsc --noEmit -p .",
+    "build": "bun build --compile --minify src/main.tsx --outfile dist/running",
+    "install-bin": "bun run build && cp dist/running ~/.local/bin/running"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.3.0",
+    "typescript": "^7"
+  },
+  "dependencies": {
+    "ink": "6",
+    "react": "19",
+    "yaml": "^2.9.1"
+  },
+  "bin": {
+    "running": "src/main.tsx"
+  }
+}
