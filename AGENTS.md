@@ -45,8 +45,18 @@ focuses, peeks at and stops them. See `README.md` for behavior and `CHANGELOG.md
   (`src/serve.ts`, compiled with Bun) as a child process and talks JSON lines over stdio —
   **all process logic stays in the TypeScript modules**; Swift only presents it (the
   grouping/sorting in `mac/…/Model/Grouping.swift` mirrors `src/ui/App.tsx` — change both).
-- `bun run build:app` → `dist/app.noindex/Running.app` (`--dmg` for the disk image, `--install` to replace
-  `/Applications/Running.app` and open it). `bun run test:app` runs the Swift tests.
+- Two variants, one instance of each: **official** `Running.app` (from GitHub releases, updates
+  itself — `mac/…/Core/Updater.swift`) and **dev** `Running Dev.app` (amber icon, bundle id
+  `….dev`, ⌘ added to its global shortcuts). Show the person new work in the dev app:
+  `bun run install-app` builds it from the checkout and replaces `/Applications/Running Dev.app`.
+  Don't install local builds over the official app.
+- `bun run build:app` → `dist/app.noindex/Running.app` (official; `--dmg` for the disk image,
+  `--dev` for the dev variant). `bun run test:app` runs the Swift tests.
+- Rehearse an update without touching the installed apps: build with
+  `RUNNING_TEST_BUNDLE_ID=…updatetest` (and `RUNNING_TEST_VERSION`) — an old app in a temp dir,
+  a newer `--dmg` — serve a GitHub-style `release.json` locally, and run the old app with
+  `RUNNING_UPDATE_FEED=http://127.0.0.1:…/release.json RUNNING_DEBUG=1`; debug commands
+  `checkUpdate`, `askUpdate`, `installUpdate`, `updatePhase` (render with `"view":"update"`).
 - Develop without bundling: `swift build --package-path mac`, then run
   `RUNNING_CORE_SCRIPT=$PWD/src/serve.ts RUNNING_CONFIG_DIR=<tmp> $(swift build --package-path mac --show-bin-path)/Running --open-window`.
 - Verify UI changes: start it with `RUNNING_DEBUG=1`, then drive it with distributed

@@ -44,13 +44,13 @@ final class HotKey {
         return status == noErr
     }
 
-    /// ⌃⌥R
-    static func controlOptionR(_ action: @escaping () -> Void) -> HotKey? {
-        HotKey(keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(controlKey | optionKey), action: action)
+    /// The menu bar panel: ⌃⌥R (dev app: ⌃⌥⌘R).
+    static func panel(_ action: @escaping () -> Void) -> HotKey? {
+        HotKey(keyCode: UInt32(kVK_ANSI_R), modifiers: Variant.current.hotKeyModifiers, action: action)
     }
 
-    /// ⇧⌃⌥R
-    static func shiftControlOptionR(_ action: @escaping () -> Void) -> HotKey? {
-        HotKey(keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(controlKey | optionKey | shiftKey), action: action)
+    /// The window: ⇧⌃⌥R (dev app: ⇧⌃⌥⌘R).
+    static func window(_ action: @escaping () -> Void) -> HotKey? {
+        HotKey(keyCode: UInt32(kVK_ANSI_R), modifiers: Variant.current.hotKeyModifiers | UInt32(shiftKey), action: action)
     }
 }

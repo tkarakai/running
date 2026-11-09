@@ -2,12 +2,36 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(Store.self) private var store
+    @Environment(Updater.self) private var updater
     @State private var launchAtLogin = Preferences.shared.launchAtLogin
     @State private var options = Preferences.terminalOptions()
+
+    var updateStatus: String {
+        if let r = updater.available { return "v\(r.version) available" }
+        if let e = updater.lastError { return "Couldn't check: \(e)" }
+        guard let t = updater.lastChecked else { return "Checks GitHub every few hours" }
+        return "Up to date · checked \(t.formatted(.relative(presentation: .named)))"
+    }
 
     var body: some View {
         @Bindable var prefs = store.prefs
         Form {
+            if let r = updater.available {
+                Section {
+                    HStack(spacing: 12) {
+                        UpdateDot(size: 22)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Update app: v\(Variant.version) → v\(r.version)").font(.headline)
+                            Text("Running quits and reopens; your processes keep running.").font(.callout).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Update…") { updater.askToInstall() }.buttonStyle(.borderedProminent)
+                    }
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                    .onTapGesture { updater.askToInstall() }
+                }
+            }
             Section("Starting processes") {
                 Picker("Start kept processes in", selection: $prefs.terminal) {
                     ForEach(options) { t in
@@ -23,12 +47,11 @@ struct SettingsView: View {
             }
 
             Section("Menu bar") {
-                Toggle("Show the number of running jobs on the icon", isOn: $prefs.showCountInMenuBar)
                 Toggle(isOn: $prefs.hotKeyEnabled) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Shortcuts from any app")
-                        HStack(spacing: 6) { Kbd("⌃⌥R"); Text("the menu bar panel").foregroundStyle(.secondary) }.font(.callout)
-                        HStack(spacing: 6) { Kbd("⇧⌃⌥R"); Text("this window").foregroundStyle(.secondary) }.font(.callout)
+                        HStack(spacing: 6) { Kbd(Variant.current.panelShortcut); Text("the menu bar panel").foregroundStyle(.secondary) }.font(.callout)
+                        HStack(spacing: 6) { Kbd(Variant.current.windowShortcut); Text("this window").foregroundStyle(.secondary) }.font(.callout)
                     }
                 }
                 Toggle("Open at login", isOn: $launchAtLogin)
@@ -72,7 +95,23 @@ struct SettingsView: View {
             }
 
             Section("About") {
-                LabeledContent("Version") { Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? store.hello?.version ?? "dev") }
+                LabeledContent("Version") {
+                    HStack(spacing: 8) {
+                        Text(Variant.versionLabel).textSelection(.enabled)
+                        if Variant.current.isDev { Text("DEV").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1).background(.orange.opacity(0.2), in: Capsule()).foregroundStyle(.orange) }
+                    }
+                }
+                if updater.enabled {
+                    LabeledContent("Updates") {
+                        HStack(spacing: 10) {
+                            if updater.checking { ProgressView().controlSize(.small) }
+                            Text(updateStatus).foregroundStyle(.secondary)
+                            Button("Check Now") { Task { await updater.check() } }.disabled(updater.checking)
+                        }
+                    }
+                } else {
+                    LabeledContent("Updates") { Text("Dev build — rebuild with `bun run install-app`").foregroundStyle(.secondary) }
+                }
                 if let h = store.hello { LabeledContent("Engine") { Text("running \(h.version) · Bun \(h.bun)").foregroundStyle(.secondary) } }
                 LabeledContent("Also in your terminal") { Text("running").font(.system(.callout, design: .monospaced)).foregroundStyle(.secondary) }
                 Button("Keyboard Shortcuts…") { NotificationCenter.default.post(name: .showShortcuts, object: nil) }
@@ -94,8 +133,8 @@ struct ShortcutsView: View {
 
     let groups: [(String, [(String, String)])] = [
         ("From any app", [
-            ("⌃⌥R", "Open the menu bar panel"),
-            ("⇧⌃⌥R", "Open this window (again: put it away)"),
+            (Variant.current.panelShortcut, "Open the menu bar panel"),
+            (Variant.current.windowShortcut, "Open this window (again: put it away)"),
             ("⌘-Tab", "Back to this window while it's open"),
         ]),
         ("A job or one of its processes", [

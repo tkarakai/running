@@ -25,8 +25,7 @@ shared with the terminal UI, so you can use both.
 - **Menu bar** — click the icon (or press **⌃⌥R** anywhere) for a quick panel: what's
   running, grouped by where; type to filter, `↑↓`, `⏎` opens its web page or focuses its
   terminal, `⌘⏎` shows it in the window, `⌘⌫` stops it; `tab` switches to Kept, where `⏎`
-  starts one. The icon shows how many jobs you have running in a small badge (Settings can hide it).
-  **⇧⌃⌥R** opens the window from anywhere.
+  starts one. **⇧⌃⌥R** opens the window from anywhere.
 - **Window** — a sidebar (Running's pages now; room for more utilities later), the process
   list, and an inspector with details (command, directory, git branch, ports and web pages,
   CPU/memory sparklines, the agent's conversation stats) and **output** (terminal scrollback,
@@ -41,14 +40,20 @@ shared with the terminal UI, so you can use both.
   use) — and types `cd dir && command` into its shell, so it's in your history and the
   command log like anything you typed. The first time, macOS asks to let Running control
   that terminal.
-- **Settings** — terminal, menu bar count, the ⌃⌥R / ⇧⌃⌥R shortcuts, open at login, confirmation
+- **Updates** — the app checks GitHub every few hours. When a new version is out, its icon
+  and the Settings gear get a red **!** and Settings offers *Update app*: one click shows
+  what's new, downloads and verifies the new version, installs it and reopens Running.
+- **Settings** — terminal, the ⌃⌥R / ⇧⌃⌥R shortcuts, open at login, confirmation
   before stopping, and whether the shell integration is set up.
 
 Install: download `Running-X.Y.Z-arm64.dmg` from the [releases](https://github.com/tkarakai/running/releases)
 (Apple silicon, macOS 26 Tahoe or later) and drag Running to Applications. It isn't signed
 with an Apple developer account: the first time, right-click it → **Open**, or run
-`xattr -dr com.apple.quarantine /Applications/Running.app`. From a checkout:
-`bun run install-app` builds it and replaces `/Applications/Running.app`.
+`xattr -dr com.apple.quarantine /Applications/Running.app`. After that it updates itself.
+
+From a checkout, `bun run install-app` builds **Running Dev.app** — amber icon, its own
+settings, ⌘ added to its global shortcuts (⌃⌥⌘R, ⇧⌃⌥⌘R) — which runs next to the official
+app. Each runs once: opening a copy quits the one already running.
 
 The shell integration below is still what names jobs whose launcher exited and finds their
 terminal tabs; the app works without it, with less detail.
@@ -168,7 +173,8 @@ Versions follow semver and are released with GitHub releases:
    downloads: the desktop app (`Running-X.Y.Z-arm64.dmg`), the 0.7 MB bundle (needs Bun;
    built with the version named in the notes) and a self-contained Apple-silicon binary
    (`bun run build:standalone`).
-3. `bun run install-bin` (terminal UI) and `bun run install-app` (desktop app) to install them.
+3. `bun run install-bin` to install the terminal UI. The desktop app updates itself (or
+   download the disk image); `bun run install-app` installs Running Dev from the checkout.
 
 ## Data
 

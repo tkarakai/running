@@ -5,20 +5,31 @@ the version is in `package.json` and shown in the TUI header and by `running --v
 
 ## Unreleased
 
+### Added
+- Running.app **updates itself** from GitHub releases. It checks every few hours; when a new
+  version is out, the menu bar icon and the Settings gear show a red **!**, and the panel,
+  the gear menu and Settings offer **Update app: vX → vY**. One click shows what's new, then
+  downloads the disk image (with progress), checks it against GitHub's SHA-256, its code
+  signature and version, swaps the app in place and reopens it. Nothing changes if any step
+  fails. (Updating to this version is the last manual install.)
+- Running.app: **⌘W** closes the window (or the panel); **⇧⌃⌥R** opens the window from any
+  app. The keyboard shortcuts list starts with the shortcuts that work from any app.
+
 ### Changed
 - Running.app: while its window is open, the app is in the Dock and ⌘-Tab (with its own
   menu bar), so the window is easy to get back to after switching away. Closing the window
   puts it back to menu bar only.
-- Running.app: the job count is a small badge on the menu bar icon instead of a number next
-  to it, so the item takes about half the space.
-
-### Added
-- Running.app: **⌘W** closes the window (or the panel); **⇧⌃⌥R** opens the window from any
-  app. The keyboard shortcuts list starts with the shortcuts that work from any app.
+- Running.app: the menu bar icon is just the icon — no job count next to it.
+- Running.app: only one copy runs at a time; opening another (a new version, a second copy)
+  quits the one that was running.
 
 ### Development
-- `bun run build:app` builds into `dist/app.noindex/Running.app` and unregisters it, so build
-  copies no longer show up in Spotlight, Launchpad or "Open With" next to the installed app.
+- `bun run install-app` builds **Running Dev.app** from the checkout: its own bundle id,
+  an amber icon, ⌘ added to its global shortcuts (⌃⌥⌘R, ⇧⌃⌥⌘R), never updates itself. It runs
+  next to the official app, one instance of each. Installing the official app from a local
+  build needs `--official`.
+- `bun run build:app` builds into `dist/app.noindex/` and unregisters it, so build copies no
+  longer show up in Spotlight, Launchpad or "Open With" next to the installed app.
 
 ## 0.7.0 — 2026-11-09
 

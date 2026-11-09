@@ -12,7 +12,7 @@
     "release": "bun scripts/release.ts",
     "build:standalone": "bun scripts/build.ts --standalone",
     "build:app": "bun scripts/build-app.ts",
-    "install-app": "bun scripts/build-app.ts --install",
+    "install-app": "bun scripts/build-app.ts --dev --install",
     "test:app": "swift test --package-path mac"
   },
   "devDependencies": {

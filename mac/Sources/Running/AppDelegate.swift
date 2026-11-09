@@ -8,20 +8,23 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate, NSMenuItemValidation {
     let store = Store()
     let ui = UIState()
+    let updater = Updater()
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var window: NSWindow?
     private var hotKey: HotKey?
     private var windowHotKey: HotKey?
-    private var shownCount: Int?? = .none
+    private var shownAlert: Bool?
     private var lastPopoverClose = Date.distantPast
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        SingleInstance.takeOver() // before anything global (status item, shortcuts) is claimed
         NSApp.setActivationPolicy(.accessory)
         buildMenu()
         setUpStatusItem()
         setUpPopover()
         store.start()
+        updater.start()
         observeCount()
         store.prefs.onHotKeyChange = { [weak self] in self?.updateHotKey() }
         updateHotKey()
@@ -33,7 +36,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             }
         }
         let args = ProcessInfo.processInfo.arguments
-        if args.contains("--open-window") || !UserDefaults.standard.bool(forKey: "hasLaunched") {
+        if let from = UserDefaults.standard.string(forKey: "updatedFrom") {
+            // Just updated: back where the update started, with a word about it.
+            UserDefaults.standard.removeObject(forKey: "updatedFrom")
+            showWindow(select: nil, route: nil)
+            store.flash(from == Variant.version ? "Running is up to date" : "Updated to Running \(Variant.version) (from \(from))", .ok)
+        } else if args.contains("--open-window") || !UserDefaults.standard.bool(forKey: "hasLaunched") {
             // First launch: show the window, so it's obvious where the app went.
             UserDefaults.standard.set(true, forKey: "hasLaunched")
             showWindow(select: nil, route: args.contains("--kept") ? .kept : nil)
@@ -54,20 +62,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private func setUpStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let b = statusItem.button else { return }
-        b.image = AppArt.menuBarImage(count: nil)
+        b.image = AppArt.menuBarImage(tint: Variant.current.glyphTint)
         b.imagePosition = .imageOnly
         b.target = self
         b.action = #selector(statusClicked(_:))
         b.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        b.toolTip = "Running — what you started, across all your terminals (⌃⌥R; the window: ⇧⌃⌥R)"
-        b.setAccessibilityLabel("Running")
+        let v = Variant.current
+        b.toolTip = "\(v.appName) — what you started, across all your terminals (\(v.panelShortcut); the window: \(v.windowShortcut))"
+        b.setAccessibilityLabel(v.appName)
     }
 
     private func observeCount() {
         withObservationTracking {
             _ = store.rows
             _ = store.loaded
-            _ = store.prefs.showCountInMenuBar
+            _ = updater.available
         } onChange: { [weak self] in
             DispatchQueue.main.async { self?.updateCount(); self?.observeCount() }
         }
@@ -77,12 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private func updateCount() {
         guard let b = statusItem?.button else { return }
         let n = store.userJobs.count
-        let count: Int? = store.prefs.showCountInMenuBar && store.loaded ? n : nil
-        if shownCount != .some(count) {
-            shownCount = .some(count)
-            b.image = AppArt.menuBarImage(count: count)
+        let alert = updater.available != nil
+        if shownAlert != alert {
+            shownAlert = alert
+            b.image = AppArt.menuBarImage(alert: alert, tint: Variant.current.glyphTint)
         }
-        b.setAccessibilityValue("\(n) running")
+        b.setAccessibilityValue("\(n) running" + (alert ? ", update available" : ""))
     }
 
     @objc private func statusClicked(_ sender: NSStatusBarButton) {
@@ -96,10 +105,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     private func showStatusMenu() {
         let m = NSMenu()
-        m.addItem(withTitle: "Open Running", action: #selector(openFromMenu), keyEquivalent: "").target = self
+        let name = Variant.current.appName
+        if let r = updater.available {
+            let u = m.addItem(withTitle: "Update app: v\(Variant.version) → v\(r.version)…", action: #selector(menuUpdate), keyEquivalent: "")
+            u.target = self
+            u.image = NSImage(systemSymbolName: "exclamationmark.circle.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(paletteColors: [.white, .systemRed]))
+            m.addItem(.separator())
+        }
+        m.addItem(withTitle: "Open \(name)", action: #selector(openFromMenu), keyEquivalent: "").target = self
         m.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: "").target = self
+        if updater.enabled && updater.available == nil {
+            m.addItem(withTitle: "Check for Updates…", action: #selector(menuCheckUpdates), keyEquivalent: "").target = self
+        }
         m.addItem(.separator())
-        m.addItem(withTitle: "Quit Running", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        m.addItem(withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         statusItem.menu = m
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
@@ -116,10 +136,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
                 self?.popover.performClose(nil)
                 self?.showWindow(select: sel, route: route)
             },
-            close: { [weak self] in self?.popover.performClose(nil) }
+            close: { [weak self] in self?.popover.performClose(nil) },
+            update: { [weak self] in self?.menuUpdate() }
         )
         .environment(store)
         .environment(ui)
+        .environment(updater)
         let host = NSHostingController(rootView: view)
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
@@ -148,8 +170,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         hotKey = nil
         windowHotKey = nil
         guard store.prefs.hotKeyEnabled else { return }
-        hotKey = HotKey.controlOptionR { [weak self] in self?.togglePopover() }
-        windowHotKey = HotKey.shiftControlOptionR { [weak self] in self?.toggleWindow() }
+        hotKey = HotKey.panel { [weak self] in self?.togglePopover() }
+        windowHotKey = HotKey.window { [weak self] in self?.toggleWindow() }
     }
 
     var hotKeysRegistered: [Bool] { [hotKey != nil, windowHotKey != nil] }
@@ -165,6 +187,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     // ── main window ──────────────────────────────────────────────────────
     @objc func openFromMenu() { showWindow(select: nil, route: nil) }
     @objc func openSettings() { showWindow(select: nil, route: .settings) }
+    /// The update sheet lives on the window: open it, then ask.
+    @objc func menuUpdate() {
+        if popover.isShown { popover.performClose(nil) }
+        showWindow(select: nil, route: .settings)
+        updater.askToInstall()
+    }
+    @objc func menuCheckUpdates() {
+        showWindow(select: nil, route: .settings)
+        Task {
+            await updater.check()
+            if updater.available != nil { updater.askToInstall() }
+            else if let e = updater.lastError { store.flash("Couldn't check for updates: \(e)", .warn) }
+            else { store.flash("Running \(Variant.version) is the latest version", .ok) }
+        }
+    }
 
     func showWindow(select: ItemID?, route: Route?) {
         if let route { ui.route = route }
@@ -197,11 +234,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     }
 
     private func makeWindow() -> NSWindow {
-        let root = RootView().environment(store).environment(ui)
+        let root = RootView().environment(store).environment(ui).environment(updater)
         let host = NSHostingController(rootView: root)
         host.sceneBridgingOptions = [.all]
         let w = NSWindow(contentViewController: host)
-        w.title = "Running"
+        w.title = Variant.current.appName
         w.identifier = NSUserInterfaceItemIdentifier("main")
         w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         w.toolbarStyle = .unified
@@ -250,16 +287,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             i.target = target ?? self
             return i
         }
-        sub("Running", [
-            item("About Running", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", target: NSApp),
+        let name = Variant.current.appName
+        var appItems: [NSMenuItem] = [
+            item("About \(name)", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", target: NSApp),
+        ]
+        if updater.enabled { appItems.append(item("Check for Updates…", #selector(menuCheckUpdates), "")) }
+        sub(name, appItems + [
             .separator(),
             item("Settings…", #selector(menuSettings), ","),
             .separator(),
-            item("Hide Running", #selector(NSApplication.hide(_:)), "h", target: NSApp),
+            item("Hide \(name)", #selector(NSApplication.hide(_:)), "h", target: NSApp),
             item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option], target: NSApp),
             item("Show All", #selector(NSApplication.unhideAllApplications(_:)), "", target: NSApp),
             .separator(),
-            item("Quit Running", #selector(NSApplication.terminate(_:)), "q", target: NSApp),
+            item("Quit \(name)", #selector(NSApplication.terminate(_:)), "q", target: NSApp),
         ])
         sub("Edit", [
             item("Undo", Selector(("undo:")), "z", target: nil as AnyObject?),
@@ -295,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m", target: nil as AnyObject?),
             item("Zoom", #selector(NSWindow.performZoom(_:)), "", target: nil as AnyObject?),
             .separator(),
-            item("Running", #selector(openFromMenu), "r", [.control, .option, .shift]),
+            item(name, #selector(openFromMenu), "r", Variant.current.isDev ? [.control, .option, .shift, .command] : [.control, .option, .shift]),
         ])
         NSApp.mainMenu = main
         NSApp.windowsMenu = main.items.last?.submenu
