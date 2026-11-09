@@ -84,6 +84,25 @@ struct PopoverView: View {
         .onChange(of: tab) { highlight = nil }
     }
 
+    static let gearPlain = gear(alert: false)
+    static let gearAlert = gear(alert: true)
+
+    func showGearMenu() {
+        let m = ActionMenu()
+        if let r = updater.available {
+            m.add("Update app: v\(Variant.version) → v\(r.version)…", symbol: "exclamationmark.circle.fill", tint: .systemRed) { update() }
+            m.separator()
+        }
+        m.add("Settings…") { openWindow(nil, .settings) }
+        m.add("Keyboard Shortcuts…") { openWindow(nil, nil); NotificationCenter.default.post(name: .showShortcuts, object: nil) }
+        if updater.enabled && updater.available == nil {
+            m.add("Check for Updates") { Task { await updater.check() } }
+        }
+        m.separator()
+        m.add("Quit \(Variant.current.appName)") { NSApp.terminate(nil) }
+        m.popUpAtMouse()
+    }
+
     /// The footer's gear, with a red "!" when an update is out. (A menu label takes an image,
     /// not a composed view, so it's drawn.)
     static func gear(alert: Bool) -> NSImage {
@@ -245,28 +264,15 @@ struct PopoverView: View {
             HStack(spacing: 4) { Kbd("⏎"); Text("open"); Text("·"); Kbd("⌘⏎"); Text("details"); Text("·"); Kbd("⌘⌫"); Text("stop") }
                 .font(.caption2).foregroundStyle(.tertiary).lineLimit(1).fixedSize()
             Spacer()
-            Menu {
-                if let r = updater.available {
-                    Button { update() } label: {
-                        Label("Update app: v\(Variant.version) → v\(r.version)…", systemImage: "exclamationmark.circle.fill")
-                    }
-                    Divider()
-                }
-                Button("Settings…") { openWindow(nil, .settings) }
-                Button("Keyboard Shortcuts…") { openWindow(nil, nil); NotificationCenter.default.post(name: .showShortcuts, object: nil) }
-                if updater.enabled && updater.available == nil {
-                    Button("Check for Updates…") { Task { await updater.check() } }
-                }
-                Divider()
-                Button("Quit \(Variant.current.appName)") { NSApp.terminate(nil) }
-            } label: {
+            // An AppKit menu, not a SwiftUI Menu: the panel re-renders every couple of seconds
+            // while it's open, and a SwiftUI menu closes when its button is redrawn under it.
+            Button { showGearMenu() } label: {
                 // The "!" sits on the gear itself, so it's seen without opening the menu.
-                Image(nsImage: Self.gear(alert: updater.available != nil))
+                Image(nsImage: updater.available != nil ? Self.gearAlert : Self.gearPlain)
             }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help(updater.available.map { "Running \($0.version) is available — Settings, Update, Quit" } ?? "Settings, Quit")
+            .buttonStyle(.borderless)
+            .fixedSize()
+            .help(updater.available.map { "Running \($0.version) is available — Settings, Update, Quit" } ?? "Settings, Quit")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
@@ -374,5 +380,35 @@ struct PopoverKeptRow: View {
         .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(highlighted ? Color.accentColor.opacity(0.14) : .clear))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { openWindow() }
+    }
+}
+
+/// An NSMenu built from closures, popped up where the mouse is.
+@MainActor
+final class ActionMenu: NSObject {
+    let menu = NSMenu()
+    private var actions: [() -> Void] = []
+
+    func add(_ title: String, symbol: String? = nil, tint: NSColor? = nil, _ action: @escaping () -> Void) {
+        let item = NSMenuItem(title: title, action: #selector(run(_:)), keyEquivalent: "")
+        item.target = self
+        item.tag = actions.count
+        if let symbol {
+            var img = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            if let tint { img = img?.withSymbolConfiguration(.init(paletteColors: [.white, tint])) }
+            item.image = img
+        }
+        actions.append(action)
+        menu.addItem(item)
+    }
+
+    func separator() { menu.addItem(.separator()) }
+
+    @objc private func run(_ sender: NSMenuItem) { actions[sender.tag]() }
+
+    /// Blocks until the menu closes (AppKit's own tracking loop), so the menu outlives redraws.
+    func popUpAtMouse() {
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        withExtendedLifetime(self) {}
     }
 }

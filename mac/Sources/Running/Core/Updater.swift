@@ -41,6 +41,11 @@ final class Updater {
     private(set) var lastChecked: Date? = UserDefaults.standard.object(forKey: "updateLastChecked") as? Date {
         didSet { UserDefaults.standard.set(lastChecked, forKey: "updateLastChecked") }
     }
+    /// The last time it asked, answered or not — the schedule counts from this, so a failed
+    /// check simply waits for the next regular one.
+    private var lastAttempt: Date? = UserDefaults.standard.object(forKey: "updateLastAttempt") as? Date {
+        didSet { UserDefaults.standard.set(lastAttempt, forKey: "updateLastAttempt") }
+    }
     /// The newest release GitHub knows of, newer or not.
     private(set) var latest: Release?
     private(set) var lastError: String?
@@ -80,16 +85,17 @@ final class Updater {
 
     func checkIfDue(olderThan age: TimeInterval = Updater.interval) {
         guard enabled else { return }
-        if let t = lastChecked, Date().timeIntervalSince(t) < age, lastError == nil { return }
+        if let t = lastAttempt, Date().timeIntervalSince(t) < age { return }
         Task { await check() }
     }
 
-    var nextCheck: Date? { lastChecked.map { $0.addingTimeInterval(Self.interval) } }
+    var nextCheck: Date? { lastAttempt.map { $0.addingTimeInterval(Self.interval) } }
 
     // ── checking ─────────────────────────────────────────────────────────
     func check() async {
         guard enabled, !checking, !phase.isBusy else { return }
         checking = true
+        lastAttempt = Date()
         defer { checking = false }
         do {
             var req = URLRequest(url: feed, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)

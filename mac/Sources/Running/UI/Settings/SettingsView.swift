@@ -176,8 +176,8 @@ struct UpdateStatusRow: View {
             if let p = r.published { parts.append("released \(ago(p))") }
         } else if let e = updater.lastError {
             parts.append(e.trimmingCharacters(in: CharacterSet(charactersIn: ". ")))
-            parts.append("trying again in 15 minutes")
             if let t = updater.lastChecked { parts.append("last checked \(ago(t))") }
+            if let next = updater.nextCheck, next > now { parts.append("next try \(next.formatted(.relative(presentation: .named, unitsStyle: .wide)))") }
             let s = parts.joined(separator: " · ")
             return s.prefix(1).uppercased() + s.dropFirst()
         } else if let l = updater.latest {
