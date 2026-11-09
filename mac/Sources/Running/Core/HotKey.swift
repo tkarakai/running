@@ -41,3 +41,10 @@ final class HotKey {
         HotKey(keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(controlKey | optionKey), action: action)
     }
 }
+
+extension HotKey {
+    /// ⇧⌃⌥R
+    static func shiftControlOptionR(_ action: @escaping () -> Void) -> HotKey? {
+        HotKey(keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(controlKey | optionKey | shiftKey), action: action)
+    }
+}

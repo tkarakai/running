@@ -17,14 +17,16 @@ and start them again later exactly as you ran them.
 
 ## Desktop app
 
-**Running.app** is the same tool for the desktop: a menu bar app (no Dock icon) with a full,
-resizable window. Same engine, same data — your kept list, sort order and command log are
+**Running.app** is the same tool for the desktop: a menu bar app with a full, resizable
+window. It's in the Dock and ⌘-Tab only while the window is open; close it (`⌘W`) and it's
+back to just the menu bar icon. Same engine, same data — your kept list, sort order and command log are
 shared with the terminal UI, so you can use both.
 
 - **Menu bar** — click the icon (or press **⌃⌥R** anywhere) for a quick panel: what's
   running, grouped by where; type to filter, `↑↓`, `⏎` opens its web page or focuses its
   terminal, `⌘⏎` shows it in the window, `⌘⌫` stops it; `tab` switches to Kept, where `⏎`
-  starts one. The icon shows how many jobs you have running (Settings can hide the number).
+  starts one. The icon shows how many jobs you have running in a small badge (Settings can hide it).
+  **⇧⌃⌥R** opens the window from anywhere.
 - **Window** — a sidebar (Running's pages now; room for more utilities later), the process
   list, and an inspector with details (command, directory, git branch, ports and web pages,
   CPU/memory sparklines, the agent's conversation stats) and **output** (terminal scrollback,
@@ -39,7 +41,7 @@ shared with the terminal UI, so you can use both.
   use) — and types `cd dir && command` into its shell, so it's in your history and the
   command log like anything you typed. The first time, macOS asks to let Running control
   that terminal.
-- **Settings** — terminal, menu bar count, the ⌃⌥R shortcut, open at login, confirmation
+- **Settings** — terminal, menu bar count, the ⌃⌥R / ⇧⌃⌥R shortcuts, open at login, confirmation
   before stopping, and whether the shell integration is set up.
 
 Install: download `Running-X.Y.Z-arm64.dmg` from the [releases](https://github.com/tkarakai/running/releases)

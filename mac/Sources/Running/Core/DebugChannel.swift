@@ -106,8 +106,12 @@ enum DebugChannel {
             var out: [String: Any] = ["sidebar": "\(delegate.ui.sidebarVisibility)", "inspectorPref": delegate.store.prefs.inspectorShown, "route": "\(delegate.ui.route)",
                                       "selection": "\(String(describing: delegate.store.selection))", "rows": delegate.store.rows.count, "toast": delegate.store.toast?.text ?? "",
                                       "confirm": delegate.store.confirmation?.title ?? "", "error": delegate.store.lastError ?? "", "fatal": delegate.store.fatal ?? "", "hello": delegate.store.hello?.version ?? "", "kept": delegate.store.kept.map(\.name)]
+            out["policy"] = ["regular", "accessory", "prohibited"][NSApp.activationPolicy().rawValue]
+            out["windowVisible"] = delegate.store.windowVisible
+            out["menuBarImageSize"] = NSApp.windows.compactMap { ($0.contentView as? NSStatusBarButton)?.image?.size }.first.map { NSStringFromSize($0) } ?? ""
             if let w = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
                 out["frame"] = NSStringFromRect(w.frame)
+                out["visible"] = w.isVisible
                 func walk(_ v: NSView, _ d: Int) -> [String] {
                     guard d < 7 else { return [] }
                     let me = "\(String(repeating: " ", count: d))\(type(of: v)) \(Int(v.frame.minX)),\(Int(v.frame.width))x\(Int(v.frame.height))\(v.isHidden ? " hidden" : "")"

@@ -3,6 +3,19 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
+## Unreleased
+
+### Changed
+- Running.app: while its window is open, the app is in the Dock and ⌘-Tab (with its own
+  menu bar), so the window is easy to get back to after switching away. Closing the window
+  puts it back to menu bar only.
+- Running.app: the job count is a small badge on the menu bar icon instead of a number next
+  to it, so the item takes about half the space.
+
+### Added
+- Running.app: **⌘W** closes the window (or the panel); **⇧⌃⌥R** opens the window from any
+  app. The keyboard shortcuts list starts with the shortcuts that work from any app.
+
 ## 0.7.0 — 2026-11-09
 
 ### Added

@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// A menu bar app: a status item with a popover, and a full window opened from it. No Dock
-/// icon (LSUIElement). The main menu isn't visible, but its key equivalents still work while
-/// the window is key — that's where the ⌘ shortcuts live.
+/// A menu bar app: a status item with a popover, and a full window opened from it. Launched
+/// as LSUIElement (no Dock icon); while the window is open it becomes a regular app — Dock
+/// icon, ⌘-Tab, its menu bar — and goes back to the menu bar alone when the window closes.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate, NSMenuItemValidation {
     let store = Store()
@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private var popover: NSPopover!
     private var window: NSWindow?
     private var hotKey: HotKey?
+    private var windowHotKey: HotKey?
+    private var shownCount: Int?? = .none
     private var lastPopoverClose = Date.distantPast
 
     func applicationDidFinishLaunching(_ note: Notification) {
@@ -53,11 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let b = statusItem.button else { return }
         b.image = AppArt.menuBarImage(count: nil)
-        b.imagePosition = .imageLeading
+        b.imagePosition = .imageOnly
         b.target = self
         b.action = #selector(statusClicked(_:))
         b.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        b.toolTip = "Running — what you started, across all your terminals (⌃⌥R)"
+        b.toolTip = "Running — what you started, across all your terminals (⌃⌥R; the window: ⇧⌃⌥R)"
         b.setAccessibilityLabel("Running")
     }
 
@@ -75,11 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private func updateCount() {
         guard let b = statusItem?.button else { return }
         let n = store.userJobs.count
-        if store.prefs.showCountInMenuBar && store.loaded {
-            b.title = " \(n)"
-            b.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: .medium)
-        } else {
-            b.title = ""
+        let count: Int? = store.prefs.showCountInMenuBar && store.loaded ? n : nil
+        if shownCount != .some(count) {
+            shownCount = .some(count)
+            b.image = AppArt.menuBarImage(count: count)
         }
         b.setAccessibilityValue("\(n) running")
     }
@@ -145,7 +146,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     private func updateHotKey() {
         hotKey = nil
-        if store.prefs.hotKeyEnabled { hotKey = HotKey.controlOptionR { [weak self] in self?.togglePopover() } }
+        windowHotKey = nil
+        guard store.prefs.hotKeyEnabled else { return }
+        hotKey = HotKey.controlOptionR { [weak self] in self?.togglePopover() }
+        windowHotKey = HotKey.shiftControlOptionR { [weak self] in self?.toggleWindow() }
+    }
+
+    /// ⇧⌃⌥R: bring the window forward, or put it away if it's already in front.
+    func toggleWindow() {
+        if let w = window, w.isVisible, w.isKeyWindow, NSApp.isActive { w.performClose(nil) } else {
+            if popover.isShown { popover.performClose(nil) }
+            showWindow(select: nil, route: nil)
+        }
     }
 
     // ── main window ──────────────────────────────────────────────────────
@@ -161,7 +173,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         let w = window ?? makeWindow()
         window = w
         store.windowVisible = true
+        // A regular app while the window is open: in the Dock and ⌘-Tab, so it's easy to get
+        // back to after switching away.
+        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
         NSApp.activate()
+        if w.isMiniaturized { w.deminiaturize(nil) }
         w.makeKeyAndOrderFront(nil)
         ui.focusListTick += 1
     }
@@ -181,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         w.delegate = self
         w.collectionBehavior.insert(.fullScreenPrimary)
         w.tabbingMode = .disallowed
+        w.hidesOnDeactivate = false
         if !w.setFrameUsingName("RunningMain") {
             w.setContentSize(NSSize(width: 1180, height: 720))
             w.center()
@@ -190,7 +207,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     }
 
     func windowWillClose(_ notification: Notification) {
-        if (notification.object as? NSWindow) === window { store.windowVisible = false }
+        guard (notification.object as? NSWindow) === window else { return }
+        store.windowVisible = false
+        // Back to the menu bar only. Deferred so the close finishes first; the app that was in
+        // front before becomes active again.
+        DispatchQueue.main.async { [weak self] in
+            guard self?.window?.isVisible != true, self?.window?.isMiniaturized != true else { return }
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     func windowDidMiniaturize(_ notification: Notification) { store.windowVisible = false }
@@ -213,9 +237,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             return i
         }
         sub("Running", [
+            item("About Running", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", target: NSApp),
+            .separator(),
             item("Settings…", #selector(menuSettings), ","),
             .separator(),
             item("Hide Running", #selector(NSApplication.hide(_:)), "h", target: NSApp),
+            item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option], target: NSApp),
+            item("Show All", #selector(NSApplication.unhideAllApplications(_:)), "", target: NSApp),
+            .separator(),
             item("Quit Running", #selector(NSApplication.terminate(_:)), "q", target: NSApp),
         ])
         sub("Edit", [
@@ -248,13 +277,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             item("Force Kill", #selector(menuKill), "\u{8}", [.command, .option]),
         ])
         sub("Window", [
-            item("Close", #selector(NSWindow.performClose(_:)), "w", target: nil as AnyObject?),
+            item("Close", #selector(menuClose), "w"),
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m", target: nil as AnyObject?),
             item("Zoom", #selector(NSWindow.performZoom(_:)), "", target: nil as AnyObject?),
+            .separator(),
+            item("Running", #selector(openFromMenu), "r", [.command, .control, .option, .shift]),
         ])
         NSApp.mainMenu = main
+        NSApp.windowsMenu = main.items.last?.submenu
     }
 
+    /// ⌘W: closes whatever's in front — a sheet, the popover, Settings' shortcuts list, or the window.
+    @objc private func menuClose() {
+        if popover.isShown { return popover.performClose(nil) }
+        guard let w = NSApp.keyWindow ?? window else { return }
+        if w.attachedSheet != nil {
+            // SwiftUI owns its sheets; close the one that has nothing to lose, leave forms alone.
+            if ui.showShortcuts { ui.showShortcuts = false } else { NSSound.beep() }
+            return
+        }
+        w.performClose(nil)
+    }
     @objc private func menuSettings() { showWindow(select: nil, route: .settings) }
     @objc private func menuFind() { if popover.isShown { return }; ui.focusSearchTick += 1 }
     @objc private func menuProcesses() { ui.route = .processes; ui.focusListTick += 1 }

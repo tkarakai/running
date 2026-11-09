@@ -7,15 +7,33 @@ enum AppArt {
     // ── menu bar ──────────────────────────────────────────────────────────
     /// Three process rows, the first one live: a dot and a bar. A template image, so it follows
     /// the menu bar's appearance (and tint).
+    /// With a count, it sits in a badge on the glyph's bottom-right corner, cut out of the glyph,
+    /// so the item stays about as narrow as the glyph alone.
     static func menuBarImage(count: Int?) -> NSImage {
-        let size = NSSize(width: 18, height: 16)
-        let img = NSImage(size: size, flipped: true) { _ in
-            NSColor.black.setFill()
+        let label = count.map { $0 > 999 ? "999+" : "\($0)" } as NSString?
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .bold)
+        let textSize = label?.size(withAttributes: [.font: font]) ?? .zero
+        let badgeH: CGFloat = 10.5
+        let badgeW = max(badgeH, ceil(textSize.width) + 4)
+        let width: CGFloat = label == nil ? 18 : max(18, 11 + badgeW)
+        let img = NSImage(size: NSSize(width: width, height: 16), flipped: true) { _ in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            NSColor.black.set()
             let rows: [(y: CGFloat, w: CGFloat, dot: Bool)] = [(2.5, 9.5, true), (7, 7.5, true), (11.5, 5, false)]
             for r in rows {
                 let dot = NSBezierPath(ovalIn: NSRect(x: 1.5, y: r.y, width: 3, height: 3))
                 if r.dot { dot.fill() } else { dot.lineWidth = 1; NSBezierPath(ovalIn: NSRect(x: 2, y: r.y + 0.5, width: 2, height: 2)).stroke() }
                 NSBezierPath(roundedRect: NSRect(x: 6.5, y: r.y + 0.25, width: r.w, height: 2.5), xRadius: 1.25, yRadius: 1.25).fill()
+            }
+            if let label {
+                let badge = NSRect(x: width - badgeW, y: 16 - badgeH, width: badgeW, height: badgeH)
+                ctx.setBlendMode(.clear) // a gap around the badge
+                NSBezierPath(roundedRect: badge.insetBy(dx: -1.5, dy: -1.5), xRadius: badgeH / 2 + 1.5, yRadius: badgeH / 2 + 1.5).fill()
+                ctx.setBlendMode(.normal)
+                NSBezierPath(roundedRect: badge, xRadius: badgeH / 2, yRadius: badgeH / 2).fill()
+                ctx.setBlendMode(.clear) // the digits are see-through
+                label.draw(at: NSPoint(x: badge.midX - textSize.width / 2, y: badge.midY - textSize.height / 2), withAttributes: [.font: font, .foregroundColor: NSColor.black])
+                ctx.setBlendMode(.normal)
             }
             return true
         }

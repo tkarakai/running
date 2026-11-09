@@ -23,9 +23,13 @@ struct SettingsView: View {
             }
 
             Section("Menu bar") {
-                Toggle("Show the number of running jobs", isOn: $prefs.showCountInMenuBar)
+                Toggle("Show the number of running jobs on the icon", isOn: $prefs.showCountInMenuBar)
                 Toggle(isOn: $prefs.hotKeyEnabled) {
-                    HStack { Text("Open with"); Kbd("⌃⌥R"); Text("from anywhere") }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Shortcuts from any app")
+                        HStack(spacing: 6) { Kbd("⌃⌥R"); Text("the menu bar panel").foregroundStyle(.secondary) }.font(.callout)
+                        HStack(spacing: 6) { Kbd("⇧⌃⌥R"); Text("this window").foregroundStyle(.secondary) }.font(.callout)
+                    }
                 }
                 Toggle("Open at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, v in prefs.launchAtLogin = v; launchAtLogin = prefs.launchAtLogin }
@@ -89,6 +93,11 @@ struct ShortcutsView: View {
     @Environment(\.dismiss) private var dismiss
 
     let groups: [(String, [(String, String)])] = [
+        ("From any app", [
+            ("⌃⌥R", "Open the menu bar panel"),
+            ("⇧⌃⌥R", "Open this window (again: put it away)"),
+            ("⌘-Tab", "Back to this window while it's open"),
+        ]),
         ("A job or one of its processes", [
             ("→  ←", "Show / hide a job's processes"),
             ("⏎  or double-click", "Open its web page, else focus its terminal"),
@@ -122,7 +131,8 @@ struct ShortcutsView: View {
             ("⌃⌘S", "Show / hide the sidebar"),
             ("⌘R", "Refresh now"),
             ("⌘,", "Settings"),
-            ("⌃⌥R", "Open the menu bar panel from any app"),
+            ("⌘W", "Close the window (Running stays in the menu bar)"),
+            ("⌘Q", "Quit Running"),
             ("?", "This list"),
         ]),
     ]
@@ -149,6 +159,7 @@ struct ShortcutsView: View {
                                 }
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding(20)
