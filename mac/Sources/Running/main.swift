@@ -8,7 +8,7 @@ if let i = args.firstIndex(of: "--render-icon"), i + 1 < args.count {
     // Build step: render the app icon (scripts/build-app.ts).
     MainActor.assumeIsolated {
         do {
-            try AppArt.renderIconset(to: URL(fileURLWithPath: args[i + 1]))
+            try AppArt.renderIconset(to: URL(fileURLWithPath: args[i + 1]), dev: args.contains("--dev"))
             exit(0)
         } catch {
             FileHandle.standardError.write(Data("render-icon failed: \(error)\n".utf8))

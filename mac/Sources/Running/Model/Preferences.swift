@@ -11,7 +11,6 @@ final class Preferences {
 
     /// Where "Start" and restart-fallbacks open: terminal | iterm | ghostty | tmux.
     var terminal: String { didSet { d.set(terminal, forKey: "terminal") } }
-    var showCountInMenuBar: Bool { didSet { d.set(showCountInMenuBar, forKey: "showCountInMenuBar") } }
     var confirmStop: Bool { didSet { d.set(confirmStop, forKey: "confirmStop") } }
     var hotKeyEnabled: Bool { didSet { d.set(hotKeyEnabled, forKey: "hotKeyEnabled"); onHotKeyChange?() } }
     var showAppServers: Bool { didSet { d.set(showAppServers, forKey: "showAppServers") } }
@@ -21,11 +20,10 @@ final class Preferences {
 
     private init() {
         d.register(defaults: [
-            "showCountInMenuBar": true, "confirmStop": true, "hotKeyEnabled": true,
+            "confirmStop": true, "hotKeyEnabled": true,
             "showAppServers": false, "inspectorShown": true,
         ])
         terminal = d.string(forKey: "terminal") ?? Preferences.guessTerminal()
-        showCountInMenuBar = d.bool(forKey: "showCountInMenuBar")
         confirmStop = d.bool(forKey: "confirmStop")
         hotKeyEnabled = d.bool(forKey: "hotKeyEnabled")
         showAppServers = d.bool(forKey: "showAppServers")

@@ -85,13 +85,14 @@ enum DebugChannel {
             case "output": content = AnyView(InspectorView().onAppear { ui.inspectorTab = .output })
             case "settings": content = AnyView(SettingsView())
             case "shortcuts": content = AnyView(ShortcutsView())
+            case "update": content = AnyView(UpdateSheet())
             case "keep":
                 if let d = store.keepDraft?.draft {
                     content = AnyView(KeepForm(mode: .keep(pid: 0), title: d.title, name: d.name, command: d.command, cwd: d.cwd, note: d.note, env: d.env))
                 } else { content = AnyView(Text("no draft")) }
             default: content = AnyView(InspectorView())
             }
-            let host = NSHostingView(rootView: content.environment(store).environment(ui).frame(width: w, height: h).background(Color(nsColor: .windowBackgroundColor)))
+            let host = NSHostingView(rootView: content.environment(store).environment(ui).environment(delegate.updater).frame(width: w, height: h).background(Color(nsColor: .windowBackgroundColor)))
             let win = NSWindow(contentRect: NSRect(x: -5000, y: 0, width: w, height: h), styleMask: [.borderless], backing: .buffered, defer: false)
             win.contentView = host
             win.appearance = NSApp.effectiveAppearance
@@ -106,8 +107,19 @@ enum DebugChannel {
             var out: [String: Any] = ["sidebar": "\(delegate.ui.sidebarVisibility)", "inspectorPref": delegate.store.prefs.inspectorShown, "route": "\(delegate.ui.route)",
                                       "selection": "\(String(describing: delegate.store.selection))", "rows": delegate.store.rows.count, "toast": delegate.store.toast?.text ?? "",
                                       "confirm": delegate.store.confirmation?.title ?? "", "error": delegate.store.lastError ?? "", "fatal": delegate.store.fatal ?? "", "hello": delegate.store.hello?.version ?? "", "kept": delegate.store.kept.map(\.name)]
+            out["policy"] = ["regular", "accessory", "prohibited"][NSApp.activationPolicy().rawValue]
+            out["windowVisible"] = delegate.store.windowVisible
+            out["active"] = NSApp.isActive
+            out["variant"] = Variant.current.rawValue
+            out["version"] = Variant.versionLabel
+            out["update"] = delegate.updater.available?.version ?? ""
+            out["updateError"] = delegate.updater.lastError ?? ""
+            out["updatePhase"] = "\(delegate.updater.phase)"
+            out["hotKeys"] = delegate.hotKeysRegistered
+            out["menuBarImageSize"] = NSApp.windows.compactMap { ($0.contentView as? NSStatusBarButton)?.image?.size }.first.map { NSStringFromSize($0) } ?? ""
             if let w = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
                 out["frame"] = NSStringFromRect(w.frame)
+                out["visible"] = w.isVisible
                 func walk(_ v: NSView, _ d: Int) -> [String] {
                     guard d < 7 else { return [] }
                     let me = "\(String(repeating: " ", count: d))\(type(of: v)) \(Int(v.frame.minX)),\(Int(v.frame.width))x\(Int(v.frame.height))\(v.isHidden ? " hidden" : "")"
@@ -119,6 +131,20 @@ enum DebugChannel {
             if let d = try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted]) { try? d.write(to: URL(fileURLWithPath: path)) }
         case "popover": delegate.showPopover()
         case "window": delegate.showWindow(select: nil, route: nil)
+        case "toggleWindow": delegate.toggleWindow() // what ⇧⌃⌥R does
+        case "checkUpdate": Task { await delegate.updater.check() }
+        case "askUpdate": delegate.menuUpdate()
+        case "installUpdate": delegate.updater.install()
+        case "updatePhase":
+            // Fake a phase, to render the sheet in it: downloading|verifying|installing|relaunching|failed
+            switch o["phase"] as? String {
+            case "downloading": delegate.updater.phase = .downloading(received: 12_400_000, total: 32_555_348)
+            case "verifying": delegate.updater.phase = .verifying
+            case "installing": delegate.updater.phase = .installing
+            case "relaunching": delegate.updater.phase = .relaunching
+            case "failed": delegate.updater.phase = .failed("The download is damaged (checksum mismatch). Try again.")
+            default: delegate.updater.phase = .confirming
+            }
         case "size":
             if let w = NSApp.windows.first(where: { $0.isVisible && $0.identifier?.rawValue == "main" }) {
                 let f = w.frame

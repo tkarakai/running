@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(Store.self) private var store
     @Environment(UIState.self) private var ui
+    @Environment(Updater.self) private var updater
     @FocusState private var searchFocused: Bool
     @State private var windowWidth: CGFloat = 1200
     @State private var autoHidSidebar = false
@@ -48,6 +49,7 @@ struct RootView: View {
                      env: k.env.keys.sorted().map { EnvChoice(key: $0, value: k.env[$0] ?? "", secret: false, selected: true) })
         }
         .sheet(isPresented: $ui.showShortcuts) { ShortcutsView() }
+        .sheet(isPresented: Bindable(updater).sheetShown) { UpdateSheet().environment(updater) }
         .alert(store.confirmation?.title ?? "", isPresented: confirmBinding, presenting: store.confirmation) { c in
             Button(c.action, role: c.destructive ? .destructive : nil) { c.run() }.keyboardShortcut(.defaultAction)
             Button("Cancel", role: .cancel) {}
@@ -164,6 +166,7 @@ struct RootView: View {
 struct Sidebar: View {
     @Environment(Store.self) private var store
     @Environment(UIState.self) private var ui
+    @Environment(Updater.self) private var updater
 
     var body: some View {
         @Bindable var ui = ui
@@ -183,7 +186,14 @@ struct Sidebar: View {
             VStack(spacing: 0) {
                 Divider()
                 Button { ui.route = .settings } label: {
-                    Label("Settings", systemImage: "gearshape")
+                    Label {
+                        Text("Settings")
+                    } icon: {
+                        Image(systemName: "gearshape")
+                            .overlay(alignment: .bottomTrailing) {
+                                if updater.available != nil { UpdateDot().offset(x: 5, y: 4) }
+                            }
+                    }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 12).padding(.vertical, 9)
                         .contentShape(Rectangle())
@@ -191,8 +201,22 @@ struct Sidebar: View {
                 .buttonStyle(.plain)
                 .background(ui.route == .settings ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
                 .padding(.horizontal, 8).padding(.vertical, 6)
-                .help("Settings (⌘,)")
+                .help(updater.available.map { "Settings — Running \($0.version) is available (⌘,)" } ?? "Settings (⌘,)")
             }
         }
+    }
+}
+
+/// The red "!" that marks an available update.
+struct UpdateDot: View {
+    var size: CGFloat = 11
+    var body: some View {
+        Image(systemName: "exclamationmark")
+            .font(.system(size: size * 0.62, weight: .heavy))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(Circle().fill(.red))
+            .overlay(Circle().strokeBorder(.background, lineWidth: 1))
+            .accessibilityLabel("Update available")
     }
 }

@@ -96,7 +96,7 @@ final class Store {
     // ── refresh ────────────────────────────────────────────────────────────
     var interval: TimeInterval {
         if windowVisible || popoverVisible { return 2 }
-        return prefs.showCountInMenuBar ? 15 : 60
+        return 60 // nothing on screen shows it; the panel refreshes when it opens
     }
 
     func reschedule() {

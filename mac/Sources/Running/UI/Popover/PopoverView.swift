@@ -4,8 +4,10 @@ import SwiftUI
 /// way into the full window. Fully keyboard-driven: type to filter, ↑↓, ⏎, ⌘⏎, ⌘⌫, tab.
 struct PopoverView: View {
     @Environment(Store.self) private var store
+    @Environment(Updater.self) private var updater
     var openWindow: (_ select: ItemID?, _ route: Route?) -> Void
     var close: () -> Void
+    var update: () -> Void = {}
 
     enum Tab: String { case processes, kept }
     @State private var tab: Tab = .processes
@@ -40,6 +42,7 @@ struct PopoverView: View {
         let list = entries
         VStack(spacing: 0) {
             header
+            if let r = updater.available { updateStrip(r) }
             searchBar(list)
             Divider().opacity(0.5)
             if !store.loaded {
@@ -81,13 +84,76 @@ struct PopoverView: View {
         .onChange(of: tab) { highlight = nil }
     }
 
+    static let gearPlain = gear(alert: false)
+    static let gearAlert = gear(alert: true)
+
+    func showGearMenu() {
+        let m = ActionMenu()
+        if let r = updater.available {
+            m.add("Update app: v\(Variant.version) → v\(r.version)…", symbol: "exclamationmark.circle.fill", tint: .systemRed) { update() }
+            m.separator()
+        }
+        m.add("Settings…") { openWindow(nil, .settings) }
+        m.add("Keyboard Shortcuts…") { openWindow(nil, nil); NotificationCenter.default.post(name: .showShortcuts, object: nil) }
+        if updater.enabled && updater.available == nil {
+            m.add("Check for Updates") { Task { await updater.check() } }
+        }
+        m.separator()
+        m.add("Quit \(Variant.current.appName)") { NSApp.terminate(nil) }
+        m.popUpAtMouse()
+    }
+
+    /// The footer's gear, with a red "!" when an update is out. (A menu label takes an image,
+    /// not a composed view, so it's drawn.)
+    static func gear(alert: Bool) -> NSImage {
+        let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        guard let g = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?.withSymbolConfiguration(cfg) else { return NSImage() }
+        guard alert else { g.isTemplate = true; return g }
+        let size = NSSize(width: g.size.width + 4, height: g.size.height + 3)
+        let img = NSImage(size: size, flipped: false) { _ in
+            let dark = NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let tinted = NSImage(size: g.size, flipped: false) { r in
+                g.draw(in: r)
+                (dark ? NSColor.white : NSColor.black).withAlphaComponent(0.75).set()
+                r.fill(using: .sourceAtop)
+                return true
+            }
+            tinted.draw(in: NSRect(x: 0, y: 3, width: g.size.width, height: g.size.height))
+            let d: CGFloat = 9
+            let badge = NSRect(x: size.width - d, y: 0, width: d, height: d)
+            NSColor.systemRed.setFill(); NSBezierPath(ovalIn: badge).fill()
+            NSColor.white.setFill()
+            NSBezierPath(roundedRect: NSRect(x: badge.midX - 0.75, y: badge.minY + 3.4, width: 1.5, height: 3.6), xRadius: 0.75, yRadius: 0.75).fill()
+            NSBezierPath(ovalIn: NSRect(x: badge.midX - 0.8, y: badge.minY + 1.3, width: 1.6, height: 1.6)).fill()
+            return true
+        }
+        return img
+    }
+
+    func updateStrip(_ r: Updater.Release) -> some View {
+        Button(action: update) {
+            HStack(spacing: 8) {
+                UpdateDot(size: 14)
+                Text("Update app: v\(Variant.version) → v\(r.version)").font(.callout.weight(.medium))
+                Spacer()
+                Text("Update…").font(.callout).foregroundStyle(Color.accentColor)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 10).padding(.bottom, 6)
+        .help("Download and install Running \(r.version); Running restarts")
+    }
+
     var header: some View {
         HStack(spacing: 10) {
-            Image(nsImage: AppArt.menuBarImage(count: nil))
+            Image(nsImage: AppArt.menuBarImage())
                 .renderingMode(.template)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Variant.current.glyphTint.map { Color(nsColor: $0) } ?? Color.accentColor)
             VStack(alignment: .leading, spacing: 0) {
-                Text("Running").font(.headline)
+                Text(Variant.current.appName).font(.headline)
                 Text(summary).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -198,16 +264,15 @@ struct PopoverView: View {
             HStack(spacing: 4) { Kbd("⏎"); Text("open"); Text("·"); Kbd("⌘⏎"); Text("details"); Text("·"); Kbd("⌘⌫"); Text("stop") }
                 .font(.caption2).foregroundStyle(.tertiary).lineLimit(1).fixedSize()
             Spacer()
-            Menu {
-                Button("Settings…") { openWindow(nil, .settings) }
-                Button("Keyboard Shortcuts…") { openWindow(nil, nil); NotificationCenter.default.post(name: .showShortcuts, object: nil) }
-                Divider()
-                Button("Quit Running") { NSApp.terminate(nil) }
-            } label: { Image(systemName: "gearshape") }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Settings, Quit")
+            // An AppKit menu, not a SwiftUI Menu: the panel re-renders every couple of seconds
+            // while it's open, and a SwiftUI menu closes when its button is redrawn under it.
+            Button { showGearMenu() } label: {
+                // The "!" sits on the gear itself, so it's seen without opening the menu.
+                Image(nsImage: updater.available != nil ? Self.gearAlert : Self.gearPlain)
+            }
+            .buttonStyle(.borderless)
+            .fixedSize()
+            .help(updater.available.map { "Running \($0.version) is available — Settings, Update, Quit" } ?? "Settings, Quit")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
@@ -315,5 +380,35 @@ struct PopoverKeptRow: View {
         .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(highlighted ? Color.accentColor.opacity(0.14) : .clear))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { openWindow() }
+    }
+}
+
+/// An NSMenu built from closures, popped up where the mouse is.
+@MainActor
+final class ActionMenu: NSObject {
+    let menu = NSMenu()
+    private var actions: [() -> Void] = []
+
+    func add(_ title: String, symbol: String? = nil, tint: NSColor? = nil, _ action: @escaping () -> Void) {
+        let item = NSMenuItem(title: title, action: #selector(run(_:)), keyEquivalent: "")
+        item.target = self
+        item.tag = actions.count
+        if let symbol {
+            var img = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            if let tint { img = img?.withSymbolConfiguration(.init(paletteColors: [.white, tint])) }
+            item.image = img
+        }
+        actions.append(action)
+        menu.addItem(item)
+    }
+
+    func separator() { menu.addItem(.separator()) }
+
+    @objc private func run(_ sender: NSMenuItem) { actions[sender.tag]() }
+
+    /// Blocks until the menu closes (AppKit's own tracking loop), so the menu outlives redraws.
+    func popUpAtMouse() {
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        withExtendedLifetime(self) {}
     }
 }

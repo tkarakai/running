@@ -67,8 +67,10 @@ for (const bin of ["dist/running", "dist/running-standalone"]) {
 ok(`built both; each reports ${version}`);
 await $`bun scripts/build-app.ts --dmg`.quiet().catch(() => fail("app build failed (run `bun run build:app --dmg`)"));
 const appAsset = `dist/Running-${version}-arm64.dmg`;
-const plistVersion = (await $`/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" dist/Running.app/Contents/Info.plist`.text()).trim();
+const plistVersion = (await $`/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" dist/app.noindex/Running.app/Contents/Info.plist`.text()).trim();
 if (plistVersion !== version) fail(`Running.app reports ${plistVersion}, expected ${version}`);
+const variant = (await $`/usr/libexec/PlistBuddy -c "Print RunningVariant" dist/app.noindex/Running.app/Contents/Info.plist`.text()).trim();
+if (variant !== "official") fail(`Running.app is the ${variant} variant, expected official`);
 ok(`built ${appAsset}`);
 
 // Each archive contains a single executable named `running`.
@@ -87,7 +89,8 @@ const notes = `${changes}
 
 **\`Running-${version}-arm64.dmg\`** — the desktop app: a menu bar app with a full window, the
 same engine as the terminal UI. Apple silicon, macOS 26 (Tahoe) or later. Open the disk image
-and drag **Running** to Applications.
+and drag **Running** to Applications. From then on it updates itself: when a new version is
+out, its menu bar icon shows a red **!** and Settings offers the update.
 
 > **First launch:** the app isn't signed by an Apple developer account, so macOS blocks the
 > first open of a downloaded copy. Either right-click Running in Applications → **Open** →
