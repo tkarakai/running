@@ -3,12 +3,16 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
-## Unreleased
+## 0.6.0 — 2026-11-08
 
-### Development
-- Hosted on GitHub (private): pull-request workflow, CI on macOS (typecheck, tests, binary
-  build) plus secret scanning and workflow linting, Dependabot, and `bun run release` for
-  tagged GitHub releases with the program attached (as `running-X.Y.Z-macos.tar.gz`).
+### Added
+- Releases come with two downloads (macOS, xz-compressed): a 0.7 MB bundle that runs with
+  your Bun, and a self-contained Apple-silicon binary with Bun embedded. The release notes
+  say which Bun version the bundle was built with, and how to get past Gatekeeper for the
+  unsigned standalone binary.
+- `running --help` shows the Bun version it was built with and the one it runs on; a
+  mismatch prints a warning (`--version` too, on stderr).
+- Release uploads retry, and the release stays a draft until both files are uploaded.
 
 ### Changed
 - `running` is installed as a 0.7 MB bundled script run by your Bun (`#!/usr/bin/env bun`)
@@ -19,6 +23,11 @@ the version is in `package.json` and shown in the TUI header and by `running --v
 
 ### Fixed
 - Leading/trailing spaces typed into the keep / edit form are trimmed before saving.
+
+### Development
+- Hosted on GitHub (private): pull-request workflow, CI on macOS (typecheck, tests, binary
+  build) plus secret scanning and workflow linting, Dependabot, and `bun run release` for
+  tagged GitHub releases.
 
 ## 0.5.1 — 2026-11-08
 

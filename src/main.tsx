@@ -6,6 +6,15 @@ import { KEPT_FILE } from "./store.ts";
 import { LOG_FILE, SHELL_INIT } from "./hook.ts";
 import pkg from "../package.json" with { type: "json" };
 
+// Set by scripts/build.ts. The bundle runs on whatever Bun is installed; it's only tested
+// with the one it was built with. (The standalone binary carries its own, so they always match.)
+declare const __BUILT_WITH_BUN__: string | undefined;
+const BUILT_WITH = typeof __BUILT_WITH_BUN__ === "string" ? __BUILT_WITH_BUN__ : undefined;
+const bunMismatch = BUILT_WITH && BUILT_WITH !== Bun.version
+  ? `running ${pkg.version} was built and tested with Bun ${BUILT_WITH}; you have Bun ${Bun.version}. ` +
+    `It usually works, but isn't guaranteed — if it misbehaves, use the standalone build.`
+  : null;
+
 
 const arg = process.argv[2];
 if (arg === "--init" || arg === "init") {
@@ -14,6 +23,7 @@ if (arg === "--init" || arg === "init") {
 }
 if (arg === "--version" || arg === "-v") {
   console.log(pkg.version);
+  if (bunMismatch) console.error(bunMismatch);
   process.exit(0);
 }
 if (arg === "--help" || arg === "-h") {
@@ -23,7 +33,9 @@ if (arg === "--help" || arg === "-h") {
   running init       print the zsh setup (add  eval "$(command running init)"  to ~/.zshrc)
 
 Kept processes: ${KEPT_FILE}
-Command log:    ${LOG_FILE}`);
+Command log:    ${LOG_FILE}
+Bun:            ${BUILT_WITH ? `built with ${BUILT_WITH}, ` : ""}running on ${Bun.version}`);
+  if (bunMismatch) console.error(`\n${bunMismatch}`);
   process.exit(0);
 }
 if (!process.stdout.isTTY) {

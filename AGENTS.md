@@ -27,7 +27,9 @@ focuses, peeks at and stops them. See `README.md` for behavior and `CHANGELOG.md
 
 - macOS only: `src/native.ts` calls libSystem through `bun:ffi`. CI tests run on macOS.
 - `bun run typecheck`, `bun test`, `bun run build` — a single 0.7 MB JS file `dist/running`
-  (`#!/usr/bin/env bun`), not `bun build --compile`: that would embed the 85 MB Bun runtime.
+  (`#!/usr/bin/env bun`), what `install-bin` installs. `bun run build:standalone` —
+  `dist/running-standalone` with the 85 MB Bun runtime embedded; released alongside.
+  Both record the Bun version they were built with (`scripts/build.ts`).
 - Verify UI changes in a real terminal: run it in a detached tmux session
   (`tmux new-session -d -s t -x 180 -y 34 "bun src/main.tsx"`), drive it with
   `tmux send-keys`, read it with `tmux capture-pane -p`. Use `RUNNING_CONFIG_DIR` and

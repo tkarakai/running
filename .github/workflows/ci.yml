@@ -40,8 +40,10 @@ jobs:
         run: bun run typecheck
       - name: Tests
         run: bun test
-      - name: Build the binary
-        run: bun run build && ./dist/running --version
+      - name: Build the bundle and the standalone binary
+        run: |
+          bun run build && ./dist/running --version
+          bun run build:standalone && ./dist/running-standalone --version
 
   secrets:
     name: Secrets
