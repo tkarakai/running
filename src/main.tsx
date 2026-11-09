@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { render } from "ink";
+import { writeSync } from "node:fs";
 import { App, type ExitAction } from "./ui/App.tsx";
 import { KEPT_FILE } from "./store.ts";
 import { LOG_FILE, SHELL_INIT } from "./hook.ts";
@@ -31,8 +32,14 @@ if (!process.stdout.isTTY) {
 }
 
 // Alternate screen, like vim/htop: your scrollback is untouched on exit.
-const restore = () => process.stdout.write("\x1b[?25h\x1b[?1049l");
-process.stdout.write("\x1b[?1049h\x1b[H\x1b[?25l");
+// Synchronous writes: leaving the alternate screen must happen before anything we print after it.
+let restored = false;
+const restore = () => {
+  if (restored) return;
+  restored = true;
+  writeSync(1, "\x1b[?25h\x1b[?1049l");
+};
+writeSync(1, "\x1b[?1049h\x1b[H\x1b[?25l");
 process.on("exit", restore);
 
 let action: ExitAction = {};
@@ -40,6 +47,7 @@ const app = render(<App onExit={(a) => (action = a)} />, { exitOnCtrlC: false, i
 await app.waitUntilExit();
 restore();
 if (action.print) {
-  console.log(`\n  ${action.print}\n\n  (copied to clipboard — run \`eval "$(command running init)"\` in ~/.zshrc to have it typed for you)\n`);
+  // writeSync: process.exit would otherwise drop buffered output.
+  writeSync(1, `\n  ${action.print}\n\n  ${action.copied ? "Copied to the clipboard. " : ""}The \`running\` shell function isn't loaded in this terminal,\n  so it can't be put on your prompt: open a new terminal or run \`exec zsh\`\n  (~/.zshrc needs: eval "$(command running init)").\n\n`);
 }
 process.exit(0);

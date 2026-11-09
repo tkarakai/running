@@ -1,10 +1,10 @@
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { basename, relative } from "node:path";
-import { collect, gitBranch, killPids, killRow, tildify, base, type Listen, type Member, type Row } from "../procs.ts";
+import { collect, gitBranch, killPids, killRow, tildify, untildify, base, type Listen, type Member, type Row } from "../procs.ts";
 import { findKept, loadKept, matches, saveKept, sameEntry, type Kept } from "../store.ts";
 import { envChoices, prefixVars } from "../env.ts";
-import { commandLine, promptLine, toPrompt, toTmux } from "../launch.ts";
+import { commandLine, HANDOFF, handOff, toTmux } from "../launch.ts";
 import { focus, openUrl, outputFiles, peek, probe, type Peek, type Probe } from "../actions.ts";
 import { pruneLog } from "../hook.ts";
 import { agentInfo, fmtTokens, transcriptTail, type AgentInfo } from "../agents.ts";
@@ -30,6 +30,7 @@ type Overlay =
 
 export interface ExitAction {
   print?: string; // shown after the TUI closes (fallback when not run via the shell function)
+  copied?: boolean;
 }
 
 const KIND_RANK = { term: 0, server: 1, daemon: 2, app: 3 } as const;
@@ -306,10 +307,8 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
 
   /** Put a line on the user's prompt (via the shell function), or print + copy it as a fallback. */
   const handToShell = (dir: string, line: string) => {
-    if (promptLine(dir, line)) return exit();
-    const full = dir ? `cd ${tildify(dir)} && ${line}` : line;
-    Bun.spawnSync(["pbcopy"], { stdin: Buffer.from(full) });
-    props.onExit({ print: full });
+    const res = handOff(dir, line);
+    if (res.how === "copy") props.onExit({ print: res.full, copied: true });
     exit();
   };
 
@@ -321,8 +320,7 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
         setTimeout(refresh, 1000);
         return;
       }
-      if (toPrompt(k)) return exit();
-      handToShell(k.cwd, commandLine(k));
+      handToShell(untildify(k.cwd), commandLine(k));
     };
     const live = liveOf(k);
     if (live) setConfirm({ text: `"${k.name}" is already running (${live.where}). Start another?`, onYes: go });
@@ -975,7 +973,12 @@ function Details(props: { width: number; height: number; mode: Mode; row?: Row; 
           <Dot />{L("up", fmtUptime(r.etimeSec))}<Dot />{L("mem", fmtMem(r.rssKb))}
         </Text>
       ) : (
-        <Text key="live" color={c.dim}>○ not running — <Text color={c.accent}>⏎</Text> start at your prompt, <Text color={c.accent}>t</Text> in tmux</Text>
+        <Text key="live" color={c.dim}>
+          ○ not running — <Text color={c.accent}>⏎</Text>{" "}
+          {HANDOFF === "shell" ? "cd there and put it on your prompt" : HANDOFF === "type" ? "type it into this terminal (cd + command, you press Enter)" : "copy it to the clipboard"}
+          , <Text color={c.accent}>t</Text> start in tmux
+          {HANDOFF !== "shell" && <Text color={c.yellow}>  · shell function not loaded here — `exec zsh` or a new terminal</Text>}
+        </Text>
       ),
       r ? (agentInfo(r) ? <AgentLine key="agent" a={agentInfo(r)!} /> : webLine(r.listen, true)) : <Text key="web"> </Text>,
       <Text key="env" wrap="truncate-end" color={c.dim}>

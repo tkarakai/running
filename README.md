@@ -70,6 +70,10 @@ terminal (tmux, Orca, Terminal.app, iTerm2, WezTerm, kitty; others: bring the ap
 
 Starting from the prompt: the TUI exits, your shell `cd`s to the saved directory
 and the command appears on your prompt, ready to edit or run — as if you typed it.
+That needs the `running` shell function (`eval "$(command running init)"` in `~/.zshrc`,
+loaded in shells started after adding it). Without it — an older shell, or `bun dev` in this
+repo — `running` types `cd … && command` into the same terminal when it's Orca or tmux, and
+otherwise copies it to the clipboard and prints it.
 In tmux: a new window opens in the directory and the command is typed into it
 (outside tmux, a detached session called `running` is used).
 

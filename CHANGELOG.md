@@ -3,6 +3,16 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
+## 0.4.2 — 2026-11-08
+
+### Fixed
+- Starting a kept process (`⏎`) from a terminal where the `running` shell function isn't
+  loaded (a shell older than the `.zshrc` line, or `bun dev` in this repo) exited without
+  visible effect. Now: in Orca or tmux, `cd … && command` is typed into that same terminal
+  (no Enter — you review it); elsewhere it's copied and printed. The Kept tab says which of
+  these `⏎` will do, and warns when the shell function is missing.
+- Messages printed after the TUI closed could be wiped by the alternate-screen switch.
+
 ## 0.4.1 — 2026-11-08
 
 ### Fixed

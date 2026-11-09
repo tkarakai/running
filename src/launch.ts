@@ -3,7 +3,7 @@
 //    and puts the command on your prompt (zsh `print -z`), ready to edit/Enter.
 //  - tmux:   a new tmux window opens in the directory and the command is typed
 //    into it, so it lands in that shell's history and survives the TUI.
-import { shellQuote, untildify } from "./procs.ts";
+import { shellQuote, tildify, untildify } from "./procs.ts";
 import type { Kept } from "./store.ts";
 import { writeFileSync } from "node:fs";
 
@@ -23,6 +23,38 @@ export function promptLine(dir: string, line: string): boolean {
 }
 
 export const toPrompt = (k: Kept) => promptLine(untildify(k.cwd), commandLine(k));
+
+/**
+ * How "put this on my prompt" works in the terminal `running` was started from:
+ *  shell — the `running` shell function is loaded: it cd's and puts the line on the prompt
+ *  type  — no shell function, but we're in Orca or tmux: type `cd … && line` into this terminal
+ *  copy  — neither: copy it to the clipboard and print it
+ */
+export const HANDOFF: "shell" | "type" | "copy" = ACTION_FILE
+  ? "shell"
+  : process.env.ORCA_TERMINAL_HANDLE || process.env.TMUX_PANE ? "type" : "copy";
+
+const pathArg = (p: string) => (/^[\w./~+-]+$/.test(tildify(p)) ? tildify(p) : shellQuote(p));
+
+/** Hand a command to the user's shell (see HANDOFF). Call right before the TUI exits. */
+export function handOff(dir: string, line: string): { how: typeof HANDOFF; full: string } {
+  if (promptLine(dir, line)) return { how: "shell", full: line };
+  const full = dir ? `cd ${pathArg(dir)} && ${line}` : line;
+  if (HANDOFF === "type") {
+    // Typed after we've exited and the shell has its prompt back; no Enter — you review it.
+    const send = process.env.ORCA_TERMINAL_HANDLE
+      ? `orca terminal send --terminal "$RUNNING_TERM" --text "$RUNNING_LINE"`
+      : `tmux send-keys -t "$RUNNING_TERM" -l "$RUNNING_LINE"`;
+    const p = Bun.spawn(["/bin/sh", "-c", `(sleep 0.7; ${send}) >/dev/null 2>&1 &`], {
+      env: { ...process.env, RUNNING_TERM: process.env.ORCA_TERMINAL_HANDLE ?? process.env.TMUX_PANE ?? "", RUNNING_LINE: full },
+      stdout: "ignore", stderr: "ignore",
+    });
+    p.unref();
+    return { how: "type", full };
+  }
+  Bun.spawnSync(["pbcopy"], { stdin: Buffer.from(full) });
+  return { how: "copy", full };
+}
 
 function tmux(args: string[]): { ok: boolean; out: string } {
   const p = Bun.spawnSync(["tmux", ...args], { stdout: "pipe", stderr: "pipe" });
