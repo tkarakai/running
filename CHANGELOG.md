@@ -3,7 +3,7 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
-## Unreleased
+## 0.8.0 — 2026-11-09
 
 ### Added
 - Running.app **updates itself** from GitHub releases. It checks at launch and every 6 hours
