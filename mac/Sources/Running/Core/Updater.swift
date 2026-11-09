@@ -15,6 +15,7 @@ final class Updater {
         var dmg: URL
         var size: Int64
         var sha256: String?
+        var published: Date?
     }
 
     enum Phase: Equatable {
@@ -36,8 +37,15 @@ final class Updater {
 
     private(set) var available: Release?
     private(set) var checking = false
-    private(set) var lastChecked: Date?
+    /// The last check that got an answer (kept across restarts).
+    private(set) var lastChecked: Date? = UserDefaults.standard.object(forKey: "updateLastChecked") as? Date {
+        didSet { UserDefaults.standard.set(lastChecked, forKey: "updateLastChecked") }
+    }
+    /// The newest release GitHub knows of, newer or not.
+    private(set) var latest: Release?
     private(set) var lastError: String?
+    /// How often to look: GitHub allows 60 unauthenticated requests an hour; this is 4 a day.
+    static let interval: TimeInterval = 6 * 3600
     var phase: Phase = .idle
     /// Bytes per second while downloading, smoothed.
     private(set) var speed: Double = 0
@@ -54,20 +62,35 @@ final class Updater {
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var downloader: Downloader?
 
+    /// Checks at launch (unless the last check was within the hour), then whenever the last one
+    /// is 6 hours old — looked at every 15 minutes and on wake, since a plain 6-hour timer
+    /// doesn't count time asleep. Opening the window checks too if it's been an hour.
     func start() {
         guard enabled else { return }
-        Task { await check() }
-        // Every 6 hours, well inside GitHub's unauthenticated rate limit.
-        timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { Task { await self?.check() } }
+        checkIfDue(olderThan: 3600)
+        timer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkIfDue() }
+        }
+        timer?.tolerance = 60
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            // The network takes a moment to come back after wake.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { MainActor.assumeIsolated { self?.checkIfDue() } }
         }
     }
+
+    func checkIfDue(olderThan age: TimeInterval = Updater.interval) {
+        guard enabled else { return }
+        if let t = lastChecked, Date().timeIntervalSince(t) < age, lastError == nil { return }
+        Task { await check() }
+    }
+
+    var nextCheck: Date? { lastChecked.map { $0.addingTimeInterval(Self.interval) } }
 
     // ── checking ─────────────────────────────────────────────────────────
     func check() async {
         guard enabled, !checking, !phase.isBusy else { return }
         checking = true
-        defer { checking = false; lastChecked = Date() }
+        defer { checking = false }
         do {
             var req = URLRequest(url: feed, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
             req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -76,6 +99,8 @@ final class Updater {
             if let http = resp as? HTTPURLResponse, http.statusCode != 200 { throw UpdateError("GitHub answered \(http.statusCode)") }
             let release = try Self.parse(data)
             lastError = nil
+            lastChecked = Date()
+            latest = release
             available = Self.isNewer(release.version, than: Variant.version) ? release : nil
         } catch {
             lastError = (error as? UpdateError)?.message ?? error.localizedDescription
@@ -84,7 +109,7 @@ final class Updater {
 
     nonisolated static func parse(_ data: Data) throws -> Release {
         struct Asset: Decodable { var name: String; var size: Int64; var browser_download_url: URL; var digest: String? }
-        struct GHRelease: Decodable { var tag_name: String; var body: String?; var html_url: URL; var assets: [Asset]; var draft: Bool?; var prerelease: Bool? }
+        struct GHRelease: Decodable { var tag_name: String; var body: String?; var html_url: URL; var assets: [Asset]; var draft: Bool?; var prerelease: Bool?; var published_at: String? }
         let r = try JSONDecoder().decode(GHRelease.self, from: data)
         let version = r.tag_name.hasPrefix("v") ? String(r.tag_name.dropFirst()) : r.tag_name
         guard let dmg = r.assets.first(where: { $0.name.hasSuffix("-arm64.dmg") }) else { throw UpdateError("The release has no disk image") }
@@ -92,7 +117,8 @@ final class Updater {
         // The body is the CHANGELOG section, then download instructions — only the first is news.
         var notes = r.body ?? ""
         if let cut = notes.range(of: "\n## Downloads") { notes = String(notes[..<cut.lowerBound]) }
-        return Release(version: version, notes: notes.trimmingCharacters(in: .whitespacesAndNewlines), page: r.html_url, dmg: dmg.browser_download_url, size: dmg.size, sha256: sha)
+        return Release(version: version, notes: notes.trimmingCharacters(in: .whitespacesAndNewlines), page: r.html_url, dmg: dmg.browser_download_url, size: dmg.size, sha256: sha,
+                       published: r.published_at.flatMap { try? Date($0, strategy: .iso8601) })
     }
 
     /// Semver-ish: numeric parts compared in order; "1.2.3-dev" counts as 1.2.3.

@@ -6,7 +6,9 @@ the version is in `package.json` and shown in the TUI header and by `running --v
 ## Unreleased
 
 ### Added
-- Running.app **updates itself** from GitHub releases. It checks every few hours; when a new
+- Running.app **updates itself** from GitHub releases. It checks at launch and every 6 hours
+  (counting time asleep), and Settings → About shows where things stand — up to date or not,
+  when it last checked, a **Check for Updates** button and, when there is one, the update. When a new
   version is out, the menu bar icon and the Settings gear show a red **!**, and the panel,
   the gear menu and Settings offer **Update app: vX → vY**. One click shows what's new, then
   downloads the disk image (with progress), checks it against GitHub's SHA-256, its code

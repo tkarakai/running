@@ -40,7 +40,8 @@ shared with the terminal UI, so you can use both.
   use) — and types `cd dir && command` into its shell, so it's in your history and the
   command log like anything you typed. The first time, macOS asks to let Running control
   that terminal.
-- **Updates** — the app checks GitHub every few hours. When a new version is out, its icon
+- **Updates** — the app checks GitHub at launch and every 6 hours; Settings → About shows
+  when it last checked and has a **Check for Updates** button. When a new version is out, its icon
   and the Settings gear get a red **!** and Settings offers *Update app*: one click shows
   what's new, downloads and verifies the new version, installs it and reopens Running.
 - **Settings** — terminal, the ⌃⌥R / ⇧⌃⌥R shortcuts, open at login, confirmation

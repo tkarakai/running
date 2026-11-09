@@ -6,13 +6,6 @@ struct SettingsView: View {
     @State private var launchAtLogin = Preferences.shared.launchAtLogin
     @State private var options = Preferences.terminalOptions()
 
-    var updateStatus: String {
-        if let r = updater.available { return "v\(r.version) available" }
-        if let e = updater.lastError { return "Couldn't check: \(e)" }
-        guard let t = updater.lastChecked else { return "Checks GitHub every few hours" }
-        return "Up to date · checked \(t.formatted(.relative(presentation: .named)))"
-    }
-
     var body: some View {
         @Bindable var prefs = store.prefs
         Form {
@@ -96,21 +89,21 @@ struct SettingsView: View {
 
             Section("About") {
                 LabeledContent("Version") {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         Text(Variant.versionLabel).textSelection(.enabled)
                         if Variant.current.isDev { Text("DEV").font(.caption2.weight(.bold)).padding(.horizontal, 5).padding(.vertical, 1).background(.orange.opacity(0.2), in: Capsule()).foregroundStyle(.orange) }
+                        if updater.enabled {
+                            Button("Check for Updates") { Task { await updater.check() } }
+                                .disabled(updater.checking || updater.phase.isBusy)
+                        }
                     }
                 }
                 if updater.enabled {
-                    LabeledContent("Updates") {
-                        HStack(spacing: 10) {
-                            if updater.checking { ProgressView().controlSize(.small) }
-                            Text(updateStatus).foregroundStyle(.secondary)
-                            Button("Check Now") { Task { await updater.check() } }.disabled(updater.checking)
-                        }
-                    }
+                    UpdateStatusRow()
                 } else {
-                    LabeledContent("Updates") { Text("Dev build — rebuild with `bun run install-app`").foregroundStyle(.secondary) }
+                    LabeledContent("Updates") {
+                        Text("Dev build — it doesn't update itself; `bun run install-app` rebuilds it").foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                    }
                 }
                 if let h = store.hello { LabeledContent("Engine") { Text("running \(h.version) · Bun \(h.bun)").foregroundStyle(.secondary) } }
                 LabeledContent("Also in your terminal") { Text("running").font(.system(.callout, design: .monospaced)).foregroundStyle(.secondary) }
@@ -121,6 +114,85 @@ struct SettingsView: View {
         .frame(maxWidth: 680)
         .frame(maxWidth: .infinity)
         .onAppear { options = Preferences.terminalOptions(); launchAtLogin = Preferences.shared.launchAtLogin }
+    }
+}
+
+/// Where updates stand: up to date / available / checking / couldn't check — with when it was
+/// last checked and when it will be next, and the button to update when there's one.
+struct UpdateStatusRow: View {
+    @Environment(Updater.self) private var updater
+
+    var body: some View {
+        // Re-rendered every 30 s so "checked 4 minutes ago" stays true.
+        TimelineView(.periodic(from: .now, by: 30)) { ctx in
+            HStack(alignment: .center, spacing: 12) {
+                icon.frame(width: 24)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.body.weight(.medium))
+                    Text(detail(now: ctx.date)).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                if let r = updater.available {
+                    Button("Update to v\(r.version)…") { updater.askToInstall() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(updater.phase.isBusy)
+                }
+            }
+            .padding(.vertical, 2)
+            .animation(.smooth, value: updater.checking)
+        }
+    }
+
+    @ViewBuilder var icon: some View {
+        if updater.checking {
+            ProgressView().controlSize(.small)
+        } else if updater.available != nil {
+            UpdateDot(size: 20)
+        } else if updater.lastError != nil {
+            Image(systemName: "exclamationmark.triangle.fill").font(.title3).foregroundStyle(.orange)
+        } else if updater.lastChecked != nil {
+            Image(systemName: "checkmark.seal.fill").font(.title3).foregroundStyle(.green)
+        } else {
+            Image(systemName: "clock").font(.title3).foregroundStyle(.secondary)
+        }
+    }
+
+    var title: String {
+        if updater.checking { return "Checking GitHub for a new version…" }
+        if let r = updater.available { return "Running \(r.version) is available" }
+        if updater.lastError != nil { return "Couldn't check for updates" }
+        if updater.lastChecked != nil { return "Running is up to date" }
+        return "Not checked yet"
+    }
+
+    func detail(now: Date) -> String {
+        func ago(_ d: Date) -> String {
+            now.timeIntervalSince(d) < 60 ? "just now" : d.formatted(.relative(presentation: .named, unitsStyle: .wide))
+        }
+        var parts: [String] = []
+        if let r = updater.available {
+            parts.append("You have \(Variant.version)")
+            if let p = r.published { parts.append("released \(ago(p))") }
+        } else if let e = updater.lastError {
+            parts.append(e.trimmingCharacters(in: CharacterSet(charactersIn: ". ")))
+            parts.append("trying again in 15 minutes")
+            if let t = updater.lastChecked { parts.append("last checked \(ago(t))") }
+            let s = parts.joined(separator: " · ")
+            return s.prefix(1).uppercased() + s.dropFirst()
+        } else if let l = updater.latest {
+            parts.append("\(l.version) is the newest release" + (l.published.map { ", from \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""))
+        }
+        if let t = updater.lastChecked {
+            parts.append("checked \(ago(t))")
+            if updater.available == nil, let next = updater.nextCheck, next > now {
+                parts.append("next \(next.formatted(.relative(presentation: .named, unitsStyle: .wide)))")
+            }
+        } else if !updater.checking {
+            parts.append("checks GitHub every 6 hours")
+        }
+        let s = parts.joined(separator: " · ")
+        return s.prefix(1).uppercased() + s.dropFirst()
     }
 }
 

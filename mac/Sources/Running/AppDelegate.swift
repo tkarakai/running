@@ -205,6 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     func showWindow(select: ItemID?, route: Route?) {
         if let route { ui.route = route }
+        updater.checkIfDue(olderThan: 3600)
         if let select {
             store.selection = select
             if case .job(let pid) = select, let j = store.job(pid), j.kind == .app { store.showAll = true }
