@@ -53,8 +53,9 @@ await $`bun run build`.quiet().catch(() => fail("build failed (run `bun run buil
 const built = (await $`./dist/running --version`.text()).trim();
 if (built !== version) fail(`built binary reports ${built}, expected ${version}`);
 const arch = (await $`uname -m`.text()).trim() === "arm64" ? "arm64" : "x64";
-const asset = `dist/running-${version}-darwin-${arch}`;
-await $`cp dist/running ${asset}`;
+// Compressed: the binary is ~90 MB, and uploads of that size can drop mid-transfer.
+const asset = `dist/running-${version}-darwin-${arch}.tar.gz`;
+await $`tar -czf ${asset} -C dist running`;
 ok(`built ${asset}`);
 
 if (dry) {

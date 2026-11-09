@@ -8,7 +8,7 @@ the version is in `package.json` and shown in the TUI header and by `running --v
 ### Development
 - Hosted on GitHub (private): pull-request workflow, CI on macOS (typecheck, tests, binary
   build) plus secret scanning and workflow linting, Dependabot, and `bun run release` for
-  tagged GitHub releases with the binary attached.
+  tagged GitHub releases with the binary attached (as `running-X.Y.Z-darwin-arm64.tar.gz`).
 
 ## 0.5.1 — 2026-11-08
 
