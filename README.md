@@ -15,7 +15,43 @@ and start them again later exactly as you ran them.
     no-mistakes daemon run --root …                   ~/.no-mistakes        1h15    52M
 ```
 
-## Install
+## Desktop app
+
+**Running.app** is the same tool for the desktop: a menu bar app (no Dock icon) with a full,
+resizable window. Same engine, same data — your kept list, sort order and command log are
+shared with the terminal UI, so you can use both.
+
+- **Menu bar** — click the icon (or press **⌃⌥R** anywhere) for a quick panel: what's
+  running, grouped by where; type to filter, `↑↓`, `⏎` opens its web page or focuses its
+  terminal, `⌘⏎` shows it in the window, `⌘⌫` stops it; `tab` switches to Kept, where `⏎`
+  starts one. The icon shows how many jobs you have running (Settings can hide the number).
+- **Window** — a sidebar (Running's pages now; room for more utilities later), the process
+  list, and an inspector with details (command, directory, git branch, ports and web pages,
+  CPU/memory sparklines, the agent's conversation stats) and **output** (terminal scrollback,
+  log files, an agent's conversation — live, filterable). The sidebar and inspector fold
+  away as the window narrows; rows drop columns instead of squashing.
+- **Keys** — the TUI's keys work in the list (`space` keep, `o` open, `f` focus, `p` output,
+  `x`/`X` stop/kill, `⇧R` restart, `s` sort, `a` apps, `/` filter, `?` all shortcuts), plus
+  Mac ones (`⌘F`, `⌘1`/`⌘2`, `⌘I` inspector, `⌘⌫` stop, `⌘R` refresh, `⌘,` settings).
+  Everything is also on the right-click menu and on buttons.
+- **Starting** a kept process (or a restart that can't reuse its terminal) opens a new window
+  in **Ghostty, iTerm2, Terminal or tmux** — your choice in Settings (it guesses the one you
+  use) — and types `cd dir && command` into its shell, so it's in your history and the
+  command log like anything you typed. The first time, macOS asks to let Running control
+  that terminal.
+- **Settings** — terminal, menu bar count, the ⌃⌥R shortcut, open at login, confirmation
+  before stopping, and whether the shell integration is set up.
+
+Install: download `Running-X.Y.Z-arm64.dmg` from the [releases](https://github.com/tkarakai/running/releases)
+(Apple silicon, macOS 26 Tahoe or later) and drag Running to Applications. It isn't signed
+with an Apple developer account: the first time, right-click it → **Open**, or run
+`xattr -dr com.apple.quarantine /Applications/Running.app`. From a checkout:
+`bun run install-app` builds it and replaces `/Applications/Running.app`.
+
+The shell integration below is still what names jobs whose launcher exited and finds their
+terminal tabs; the app works without it, with less detail.
+
+## Install the terminal UI
 
 ```sh
 bun install
@@ -126,10 +162,11 @@ Versions follow semver and are released with GitHub releases:
 1. Release PR: bump `version` in `package.json` and turn `## Unreleased` in
    [`CHANGELOG.md`](CHANGELOG.md) into `## X.Y.Z — YYYY-MM-DD`; merge it.
 2. On an up-to-date `main`: `bun run release --dry-run`, then `bun run release` — tags
-   `vX.Y.Z` and publishes the GitHub release (CHANGELOG section as notes) with two
-   downloads: the 0.7 MB bundle (needs Bun; built with the version named in the notes) and a
-   self-contained Apple-silicon binary (`bun run build:standalone`).
-3. `bun run install-bin` to install it.
+   `vX.Y.Z` and publishes the GitHub release (CHANGELOG section as notes) with three
+   downloads: the desktop app (`Running-X.Y.Z-arm64.dmg`), the 0.7 MB bundle (needs Bun;
+   built with the version named in the notes) and a self-contained Apple-silicon binary
+   (`bun run build:standalone`).
+3. `bun run install-bin` (terminal UI) and `bun run install-app` (desktop app) to install them.
 
 ## Data
 
@@ -162,3 +199,10 @@ Secret-looking ones (`*_KEY`, `*_TOKEN`, …) are masked and unchecked by defaul
 - `src/restart.ts` — restart planning and execution.
 - `src/store.ts` — kept.yaml; `src/launch.ts` — prompt / tmux start.
 - `src/ui/` — Ink (React for the terminal).
+- `src/serve.ts` — the engine for the desktop app: the same modules behind a JSON-lines
+  protocol on stdin/stdout; compiled with Bun embedded as `running-core` inside the app.
+- `src/terminals.ts` — opening a new Ghostty / iTerm2 / Terminal / tmux window and typing a
+  command into it (the app has no prompt of its own to hand a command to).
+- `mac/` — the desktop app (Swift, SwiftUI + AppKit, macOS 26). `scripts/build-app.ts`
+  compiles the engine, builds the app, renders its icon and assembles, signs (ad hoc) and
+  packages `dist/Running.app` / `dist/Running-X.Y.Z-arm64.dmg`.

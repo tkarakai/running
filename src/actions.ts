@@ -111,6 +111,22 @@ export function focus(r: Row): FocusResult {
     end tell`);
     if (res.ok && res.out === "ok") return { ok: true, message: "switched to its iTerm tab" };
   }
+  if (tty && (t.app === "ghostty" || r.where === "Ghostty")) {
+    const res = osa(`tell application "Ghostty"
+      repeat with w in windows
+        repeat with tb in tabs of w
+          repeat with s in terminals of tb
+            if tty of s is "${tty}" then
+              focus s
+              activate
+              return "ok"
+            end if
+          end repeat
+        end repeat
+      end repeat
+    end tell`);
+    if (res.ok && res.out === "ok") return { ok: true, message: "switched to its Ghostty tab" };
+  }
   if (t.wezterm && sh(["wezterm", "cli", "activate-pane", "--pane-id", t.wezterm]).ok)
     return { ok: true, message: "switched to its WezTerm pane" };
   if (t.kitty && sh(["kitty", "@", "focus-window", "--match", `id:${t.kitty}`]).ok)

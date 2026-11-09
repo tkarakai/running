@@ -45,6 +45,32 @@ jobs:
           bun run build && ./dist/running --version
           bun run build:standalone && ./dist/running-standalone --version
 
+  app:
+    # The desktop app: Swift unit tests, then the whole bundle (engine + app + icon + dmg).
+    name: Desktop app
+    runs-on: macos-26
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Toolchain
+        run: xcodebuild -version && swift --version
+      - name: Swift tests
+        run: bun run test:app
+      - name: Build Running.app and the disk image
+        run: |
+          bun scripts/build-app.ts --dmg
+          /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" dist/Running.app/Contents/Info.plist
+          codesign --verify --strict dist/Running.app
+
   secrets:
     name: Secrets
     runs-on: ubuntu-latest
@@ -106,7 +132,7 @@ jobs:
     # Single required status check for the branch ruleset.
     name: CI
     if: always()
-    needs: [test, secrets, workflows]
+    needs: [test, app, secrets, workflows]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

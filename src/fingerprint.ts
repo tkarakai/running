@@ -90,4 +90,13 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 export const sessionIds = (cmd: string) => new Set((cmd.match(UUID) ?? []).map((s) => s.toLowerCase()));
 
 const real = (p: string) => { try { return realpathSync(p); } catch { return p; } };
-export const sameDir = (a: string, b: string) => !!a && !!b && (a === b || real(a) === real(b));
+
+/**
+ * Other apps' sandbox containers. Touching them (realpath, stat) can block until macOS's
+ * "access data from other apps" protection answers — it hung the app on Tailscale's
+ * network extension. Nothing you'd keep runs there, so never look inside.
+ */
+export const isAppContainer = (p: string) => /\/Library\/(Group )?Containers\//.test(p);
+
+export const sameDir = (a: string, b: string) =>
+  !!a && !!b && (a === b || (!isAppContainer(a) && !isAppContainer(b) && real(a) === real(b)));

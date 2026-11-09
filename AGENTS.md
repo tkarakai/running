@@ -39,6 +39,25 @@ focuses, peeks at and stops them. See `README.md` for behavior and `CHANGELOG.md
 - `bun run install-bin` removes the old file before copying (overwriting a compiled binary in
   place got it killed by macOS — cached code signature; harmless to keep doing).
 
+## The desktop app (`mac/`)
+
+- Swift package, SwiftUI + AppKit, macOS 26+, Apple silicon. It runs `running-core`
+  (`src/serve.ts`, compiled with Bun) as a child process and talks JSON lines over stdio —
+  **all process logic stays in the TypeScript modules**; Swift only presents it (the
+  grouping/sorting in `mac/…/Model/Grouping.swift` mirrors `src/ui/App.tsx` — change both).
+- `bun run build:app` → `dist/Running.app` (`--dmg` for the disk image, `--install` to replace
+  `/Applications/Running.app` and open it). `bun run test:app` runs the Swift tests.
+- Develop without bundling: `swift build --package-path mac`, then run
+  `RUNNING_CORE_SCRIPT=$PWD/src/serve.ts RUNNING_CONFIG_DIR=<tmp> $(swift build --package-path mac --show-bin-path)/Running --open-window`.
+- Verify UI changes: start it with `RUNNING_DEBUG=1`, then drive it with distributed
+  notifications named `io.github.tkarakai.running.debug` whose object is JSON —
+  `{"cmd":"snapshot","path":…}`, `{"cmd":"render","view":"procs|kept|keptlist|output|settings|popover|sidebar|keep","path":…}`
+  (offscreen, without Liquid Glass — window snapshots show glass as blank without screen
+  recording permission), `{"cmd":"key","chars":"x","keyCode":7,"mods":["cmd"]}`,
+  `{"cmd":"select","pid":…}`, `{"cmd":"route","to":"kept"}`, `{"cmd":"size","w":…,"h":…}`,
+  `{"cmd":"dump","path":…}` (see `mac/…/Core/DebugChannel.swift`).
+- The app is signed ad hoc (no developer account); Gatekeeper asks once per download.
+
 ## Bun
 
 - Use `bun <file>`, `bun test`, `bun install`, `bun run <script>`, `bunx <pkg>` — not node,
