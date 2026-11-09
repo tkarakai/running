@@ -45,7 +45,7 @@ focuses, peeks at and stops them. See `README.md` for behavior and `CHANGELOG.md
   (`src/serve.ts`, compiled with Bun) as a child process and talks JSON lines over stdio —
   **all process logic stays in the TypeScript modules**; Swift only presents it (the
   grouping/sorting in `mac/…/Model/Grouping.swift` mirrors `src/ui/App.tsx` — change both).
-- `bun run build:app` → `dist/Running.app` (`--dmg` for the disk image, `--install` to replace
+- `bun run build:app` → `dist/app.noindex/Running.app` (`--dmg` for the disk image, `--install` to replace
   `/Applications/Running.app` and open it). `bun run test:app` runs the Swift tests.
 - Develop without bundling: `swift build --package-path mac`, then run
   `RUNNING_CORE_SCRIPT=$PWD/src/serve.ts RUNNING_CONFIG_DIR=<tmp> $(swift build --package-path mac --show-bin-path)/Running --open-window`.

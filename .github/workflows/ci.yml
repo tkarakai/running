@@ -68,8 +68,8 @@ jobs:
       - name: Build Running.app and the disk image
         run: |
           bun scripts/build-app.ts --dmg
-          /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" dist/Running.app/Contents/Info.plist
-          codesign --verify --strict dist/Running.app
+          /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" dist/app.noindex/Running.app/Contents/Info.plist
+          codesign --verify --strict dist/app.noindex/Running.app
 
   secrets:
     name: Secrets

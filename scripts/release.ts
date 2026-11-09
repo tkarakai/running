@@ -67,7 +67,7 @@ for (const bin of ["dist/running", "dist/running-standalone"]) {
 ok(`built both; each reports ${version}`);
 await $`bun scripts/build-app.ts --dmg`.quiet().catch(() => fail("app build failed (run `bun run build:app --dmg`)"));
 const appAsset = `dist/Running-${version}-arm64.dmg`;
-const plistVersion = (await $`/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" dist/Running.app/Contents/Info.plist`.text()).trim();
+const plistVersion = (await $`/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" dist/app.noindex/Running.app/Contents/Info.plist`.text()).trim();
 if (plistVersion !== version) fail(`Running.app reports ${plistVersion}, expected ${version}`);
 ok(`built ${appAsset}`);
 

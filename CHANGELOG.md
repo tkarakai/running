@@ -16,6 +16,10 @@ the version is in `package.json` and shown in the TUI header and by `running --v
 - Running.app: **⌘W** closes the window (or the panel); **⇧⌃⌥R** opens the window from any
   app. The keyboard shortcuts list starts with the shortcuts that work from any app.
 
+### Development
+- `bun run build:app` builds into `dist/app.noindex/Running.app` and unregisters it, so build
+  copies no longer show up in Spotlight, Launchpad or "Open With" next to the installed app.
+
 ## 0.7.0 — 2026-11-09
 
 ### Added

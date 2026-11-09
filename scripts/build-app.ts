@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Build the desktop app, Running.app (Apple silicon, macOS 26+).
 //
-//   bun scripts/build-app.ts          dist/Running.app
+//   bun scripts/build-app.ts          dist/app.noindex/Running.app
 //   bun scripts/build-app.ts --dmg    … plus dist/Running-X.Y.Z-arm64.dmg (what releases attach)
 //   bun scripts/build-app.ts --install … then replace /Applications/Running.app and open it
 //
@@ -12,7 +12,7 @@
 // Signed ad hoc (no Apple developer account): Gatekeeper asks once on first open.
 import { $ } from "bun";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 process.chdir(join(import.meta.dir, ".."));
 const args = process.argv.slice(2);
@@ -43,8 +43,8 @@ await $`${bin}/Running --render-icon ${iconset}`;
 await $`iconutil -c icns ${iconset} -o dist/AppIcon.icns`;
 
 // 4. The bundle.
-step("bundle: dist/Running.app");
-const app = "dist/Running.app";
+step("bundle: dist/app.noindex/Running.app");
+const app = "dist/app.noindex/Running.app";
 rmSync(app, { recursive: true, force: true });
 for (const d of ["MacOS", "Resources"]) mkdirSync(`${app}/Contents/${d}`, { recursive: true });
 await $`cp ${bin}/Running ${app}/Contents/MacOS/Running`;
@@ -89,7 +89,7 @@ console.log(`built ${app} (${version}, build ${build}, ${size})`);
 // 6. Disk image: the app + a link to /Applications, to drag it into.
 if (wantDmg) {
   const dmg = `dist/Running-${version}-arm64.dmg`;
-  const stage = "dist/dmg";
+  const stage = "dist/app.noindex/dmg";
   rmSync(stage, { recursive: true, force: true });
   rmSync(dmg, { force: true });
   mkdirSync(stage);
@@ -100,6 +100,11 @@ if (wantDmg) {
   const mb = (Number((await $`stat -f %z ${dmg}`.text()).trim()) / 1048576).toFixed(1);
   console.log(`built ${dmg} (${mb} MB)`);
 }
+
+// The build copy isn't an app to launch: keep it out of Spotlight and Launchpad (the
+// `.noindex` folder does that) and out of Launch Services, so only /Applications shows up.
+const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+await $`${lsregister} -u ${resolve(app)}`.nothrow().quiet();
 
 if (install) {
   const dest = "/Applications/Running.app";

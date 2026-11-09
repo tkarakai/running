@@ -207,4 +207,4 @@ Secret-looking ones (`*_KEY`, `*_TOKEN`, …) are masked and unchecked by defaul
   command into it (the app has no prompt of its own to hand a command to).
 - `mac/` — the desktop app (Swift, SwiftUI + AppKit, macOS 26). `scripts/build-app.ts`
   compiles the engine, builds the app, renders its icon and assembles, signs (ad hoc) and
-  packages `dist/Running.app` / `dist/Running-X.Y.Z-arm64.dmg`.
+  packages `dist/app.noindex/Running.app` / `dist/Running-X.Y.Z-arm64.dmg`.
