@@ -35,8 +35,11 @@ Out of the hundreds of processes on a Mac, only the ones you most likely started
 | daemon | detached (`nohup`, `&` + closed terminal, brew services), user-owned, not an app/system binary |
 | app    | servers belonging to GUI apps or macOS — hidden until you press `a`, then shown dimmed |
 
-Rows are grouped by **where** they run (terminal app, tmux pane, detached). Each
-row is a whole process tree / process group; killing it stops all of it.
+Rows are grouped by **where** they run (terminal app, tmux pane, detached), then by the
+**directory** each job was started in (with its git branch). Each row is a whole job — a
+process tree / process group; `→` shows its processes as an indented tree, each with its own
+ports, uptime and memory. Killing a job stops all of it; `x` on one of its processes stops
+just that one.
 
 ## The command log
 
@@ -56,7 +59,7 @@ The log is pruned to 30 days once it passes 5 MB.
 
 ## Keys
 
-**Any running process:** `o` open its web page (ports marked `↗` serve HTML) · `f` focus its
+**Any job or process:** `→`/`←` show / hide a job's processes · `o` open its web page (ports marked `↗` serve HTML; a job with several shows them) · `f` focus its
 terminal (tmux, Orca, Terminal.app, iTerm2, WezTerm, kitty; others: bring the app forward) ·
 `p` peek at recent output (terminal scrollback or the log files it writes to; `←→` between them) ·
 `c` copy `cd dir && command` · `R` restart · `x` kill (again after 3s → SIGKILL)

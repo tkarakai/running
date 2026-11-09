@@ -10,6 +10,7 @@
 // unless "show all" is on.
 import { basename, dirname } from "node:path";
 import { homedir } from "node:os";
+import { readFileSync, statSync } from "node:fs";
 import { procArgs, procCwd, procPath, procStart } from "./native.ts";
 import { historyBetween, readLog, termForTty, typedFor, type Typed } from "./hook.ts";
 
@@ -28,8 +29,25 @@ export interface Proc {
 }
 
 export interface Listen {
+  pid: number; // the process that owns the socket
   port: number;
   host: string; // address to connect to: "localhost", "127.0.0.1", "[::1]", "100.x.y.z"
+}
+
+/** One process inside a job (everything but the job's root). Shown as an indented child row. */
+export interface Member {
+  pid: number;
+  ppid: number;
+  depth: number; // 0 = directly under the job row
+  displayArgv: string[];
+  argvCommand: string;
+  cwd: string;
+  listen: Listen[];
+  tty: string;
+  etimeSec: number;
+  rssKb: number;
+  cpu: number;
+  pids: number[]; // this process and its descendants within the job
 }
 
 export interface Row {
@@ -56,6 +74,7 @@ export interface Row {
   rssKb: number; // whole subtree
   cpu: number; // whole subtree
   pids: number[]; // all member processes, root first
+  members: Member[]; // the job's processes except its root, in tree order
   parentRow?: number; // pid of an enclosing row (e.g. server started by an agent)
   via?: string; // name of non-shell ancestor that launched it
   env: Record<string, string>;
@@ -129,7 +148,7 @@ async function listeners(): Promise<Map<number, Listen[]>> {
       const host = addr === "*" || addr === "0.0.0.0" || addr === "[::]" ? "localhost" : addr;
       const list = map.get(pid) ?? [];
       const prev = list.find((l) => l.port === port);
-      if (!prev) list.push({ port, host });
+      if (!prev) list.push({ pid, port, host });
       else if (host === "localhost") prev.host = host; // prefer the widest binding
       map.set(pid, list);
     }
@@ -353,6 +372,34 @@ export async function collect(opts: { selfPid: number }): Promise<Row[]> {
     return { argv, env, displayArgv, argvCommand: displayArgv.map(shellQuote).join(" ") };
   };
 
+  /** Tree-ordered members (excluding `root`, which may be an exited leader). */
+  const membersOf = (pids: number[], root: number): Member[] => {
+    const set = new Set(pids);
+    set.delete(root);
+    const kids = new Map<number, number[]>();
+    const tops: number[] = [];
+    for (const x of set) {
+      const pp = procs.get(x)!.ppid;
+      if (set.has(pp)) kids.set(pp, [...(kids.get(pp) ?? []), x]);
+      else tops.push(x);
+    }
+    const byStart = (a: number, b: number) => procs.get(b)!.etimeSec - procs.get(a)!.etimeSec || a - b;
+    const out: Member[] = [];
+    const walk = (x: number, depth: number): number[] => {
+      const p = procs.get(x)!;
+      const { displayArgv, argvCommand } = argvFor(x);
+      const m: Member = {
+        pid: x, ppid: p.ppid, depth, displayArgv, argvCommand, cwd: procCwd(x) ?? "",
+        listen: (listen.get(x) ?? []).slice(), tty: p.tty, etimeSec: p.etimeSec, rssKb: p.rssKb, cpu: p.cpu, pids: [x],
+      };
+      out.push(m);
+      for (const c of (kids.get(x) ?? []).sort(byStart)) m.pids.push(...walk(c, depth + 1));
+      return m.pids;
+    };
+    for (const t of tops.sort(byStart)) walk(t, 0);
+    return out;
+  };
+
   const rows: Row[] = [];
 
   for (const [pid, kind] of roots) {
@@ -384,7 +431,7 @@ export async function collect(opts: { selfPid: number }): Promise<Row[]> {
       command: typed?.cmd ?? argvCommand, source: typed ? "typed" : "argv", leaderGone: false,
       exe: exeOf(pid), cwd: procCwd(pid) ?? "", ports: ls.map((l) => l.port), listen: ls,
       where, term: termOf(p.tty, env, loc.pane), tty: p.tty,
-      etimeSec: p.etimeSec, rssKb: rss, cpu, pids, parentRow: loc.parentRow, via, env,
+      etimeSec: p.etimeSec, rssKb: rss, cpu, pids, members: membersOf(pids, pid), parentRow: loc.parentRow, via, env,
       baseEnv: (loc.shellPid && argsOf(loc.shellPid)?.env) || {},
       shellPid: kind === "term" && interactiveShell(p.ppid) ? p.ppid : undefined,
     });
@@ -417,7 +464,7 @@ export async function collect(opts: { selfPid: number }): Promise<Row[]> {
       ports: ls.map((l) => l.port), listen: ls,
       where: loc.where || (shell ? "terminal" : "detached"),
       term: termOf(tty, Object.assign({}, ...pids.map((x) => argsOf(x)?.env ?? {}).reverse()), loc.pane), tty,
-      etimeSec: first.etimeSec, rssKb: rss, cpu, pids, env,
+      etimeSec: first.etimeSec, rssKb: rss, cpu, pids, members: membersOf(pids, pgid), env,
       baseEnv: (shell && argsOf(shell)?.env) || {},
       shellPid: shell,
     });
@@ -458,6 +505,32 @@ export function explains(line: string, members: string[][]): boolean {
   return members.some((argv) => argv.some((a) => basename(a).toLowerCase() === prog));
 }
 
+const branchCache = new Map<string, { at: number; branch: string | null }>();
+
+/** Git branch of the repo (or worktree) containing `dir`, or a short sha when detached. */
+export function gitBranch(dir: string): string | null {
+  const hit = branchCache.get(dir);
+  if (hit && Date.now() - hit.at < 10_000) return hit.branch;
+  let branch: string | null = null;
+  try {
+    for (let d = dir; d && d !== "/"; d = dirname(d)) {
+      const dotgit = `${d}/.git`;
+      let gitdir: string | null = null;
+      try {
+        const st = statSync(dotgit);
+        gitdir = st.isDirectory() ? dotgit : readFileSync(dotgit, "utf8").match(/^gitdir:\s*(.+)$/m)?.[1]?.trim() ?? null;
+      } catch { continue; }
+      if (!gitdir) break;
+      if (!gitdir.startsWith("/")) gitdir = `${d}/${gitdir}`;
+      const head = readFileSync(`${gitdir}/HEAD`, "utf8").trim();
+      branch = head.startsWith("ref: refs/heads/") ? head.slice(16) : head.slice(0, 8);
+      break;
+    }
+  } catch {}
+  branchCache.set(dir, { at: Date.now(), branch });
+  return branch;
+}
+
 /** Deepest directory containing all of `dirs`. */
 function commonDir(dirs: string[]): string {
   if (!dirs.length) return "";
@@ -490,6 +563,15 @@ export function killRow(r: Row, signal: NodeJS.Signals): number {
   if (r.leaderGone) try { process.kill(-r.pgid, signal); n++; } catch {}
   for (const pid of [...r.pids].reverse()) {
     if (r.leaderGone && pid === r.pgid) continue;
+    try { process.kill(pid, signal); n++; } catch {}
+  }
+  return n;
+}
+
+/** Kill a set of processes (e.g. one child of a job and its descendants), children first. */
+export function killPids(pids: number[], signal: NodeJS.Signals): number {
+  let n = 0;
+  for (const pid of [...pids].reverse()) {
     try { process.kill(pid, signal); n++; } catch {}
   }
   return n;

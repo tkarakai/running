@@ -1,6 +1,6 @@
 {
   "name": "running",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "See what is running across all your terminals, keep what matters, start it again.",
   "type": "module",
   "private": true,

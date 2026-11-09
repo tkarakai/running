@@ -1,11 +1,11 @@
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { basename } from "node:path";
-import { collect, killRow, tildify, base, type Row } from "../procs.ts";
+import { basename, relative } from "node:path";
+import { collect, gitBranch, killPids, killRow, tildify, base, type Listen, type Member, type Row } from "../procs.ts";
 import { findKept, loadKept, matches, saveKept, type Kept } from "../store.ts";
 import { envChoices, prefixVars } from "../env.ts";
 import { commandLine, promptLine, toPrompt, toTmux } from "../launch.ts";
-import { focus, openUrl, peek, probe, type Peek, type Probe } from "../actions.ts";
+import { focus, openUrl, outputFiles, peek, probe, type Peek, type Probe } from "../actions.ts";
 import { pruneLog } from "../hook.ts";
 import { agentInfo, fmtTokens, transcriptTail, type AgentInfo } from "../agents.ts";
 import { planRestart, runRestart } from "../restart.ts";
@@ -16,15 +16,16 @@ import { ago, c, fit, fmtMem, fmtUptime } from "./theme.ts";
 type Mode = "procs" | "kept";
 type Item =
   | { type: "header"; label: string; tag?: string; count: number; muted: boolean }
+  | { type: "dir"; dir: string; branch: string | null; count: number; muted: boolean }
   | { type: "row"; row: Row; depth: number }
+  | { type: "child"; row: Row; m: Member; prefix: string }
   | { type: "kept"; kept: Kept; index: number; live?: Row };
 
 type Confirm = { text: string; onYes: () => void };
 type Overlay =
   | { type: "keep"; row: Row }
   | { type: "edit"; index: number }
-  | { type: "peek"; pid: number; source?: string }
-  | { type: "urls"; pid: number }
+  | { type: "peek"; pid: number; child?: number; source?: string }
   | { type: "help" };
 
 export interface ExitAction {
@@ -35,16 +36,25 @@ const KIND_RANK = { term: 0, server: 1, daemon: 2, app: 3 } as const;
 const REFRESH_MS = 2000;
 const STUCK_AFTER_MS = 3000;
 const DETAILS_H = 7;
+const TRANSCRIPT = "@transcript";
 
-type Probes = Map<string, Probe | null | "pending">; // key: `${row.pid}:${port}`
-const probeKey = (r: Row, port: number) => `${r.pid}:${port}`;
-
-/** A row's web pages (HTML over HTTP), best first. */
-function webPages(r: Row, probes: Probes): Probe[] {
-  return r.ports
-    .map((p) => probes.get(probeKey(r, p)))
-    .filter((p): p is Probe => !!p && p !== "pending" && p.web);
+// Probes are per socket: the process that owns the port + the port.
+type Probes = Map<string, Probe | null | "pending">;
+const probeKey = (l: Listen) => `${l.pid}:${l.port}`;
+const isWeb = (l: Listen, probes: Probes) => {
+  const p = probes.get(probeKey(l));
+  return !!p && p !== "pending" && p.web;
+};
+function webPages(listen: Listen[], probes: Probes): Probe[] {
+  return listen.map((l) => probes.get(probeKey(l))).filter((p): p is Probe => !!p && p !== "pending" && p.web);
 }
+
+/** A member viewed as a stand-alone row, for peek/kill. */
+const childRow = (r: Row, m: Member): Row => ({
+  ...r, pid: m.pid, pids: m.pids, members: [], leaderGone: false, tty: m.tty, cwd: m.cwd,
+  command: m.argvCommand, argvCommand: m.argvCommand, displayArgv: m.displayArgv, listen: m.listen,
+  ports: m.listen.map((l) => l.port), term: {},
+});
 
 export function App(props: { onExit: (a: ExitAction) => void }) {
   const { exit } = useApp();
@@ -60,6 +70,7 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [kept, setKept] = useState<Kept[]>(() => loadKept());
   const [probes, setProbes] = useState<Probes>(new Map());
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState("");
   const [filtering, setFiltering] = useState(false);
@@ -82,9 +93,10 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
       const next = await collect({ selfPid: process.pid });
       setRows(next);
       setKept(loadKept()); // pick up hand edits to kept.yaml
+      const alive = new Set(next.flatMap((r) => [r.pid, ...r.members.map((m) => m.pid)]));
       setStopping((s) => {
         const n = new Map(s);
-        for (const pid of n.keys()) if (!next.some((r) => r.pid === pid)) n.delete(pid);
+        for (const pid of n.keys()) if (!alive.has(pid)) n.delete(pid);
         return n;
       });
     } catch (e) {
@@ -99,18 +111,17 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
     return () => clearInterval(t);
   }, [refresh]);
 
-  // Probe each new listening port once: is it a web page?
+  // Probe each new listening socket once: is it a web page?
   useEffect(() => {
     if (!rows) return;
-    const todo = rows.flatMap((r) => r.listen.filter((l) => !probes.has(probeKey(r, l.port))).map((l) => ({ r, l })));
+    const todo = rows.flatMap((r) => r.listen).filter((l) => !probes.has(probeKey(l)));
     if (!todo.length) return;
     setProbes((m) => {
       const n = new Map(m);
-      for (const { r, l } of todo) n.set(probeKey(r, l.port), "pending");
+      for (const l of todo) n.set(probeKey(l), "pending");
       return n;
     });
-    for (const { r, l } of todo)
-      probe(l).then((res) => setProbes((m) => new Map(m).set(probeKey(r, l.port), res)));
+    for (const l of todo) probe(l).then((res) => setProbes((m) => new Map(m).set(probeKey(l), res)));
   }, [rows]);
 
   const flash = (text: string, tone: "ok" | "warn" | "err" = "ok") => setStatus({ text, tone });
@@ -138,11 +149,13 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
         .filter(({ kept: k }) => !q || `${k.name} ${k.command} ${k.cwd} ${k.note ?? ""} ${(k.ports ?? []).join(" ")}`.toLowerCase().includes(q));
     }
     if (!rows) return [];
+    const memberHit = (m: Member) => `${m.argvCommand} ${m.cwd} ${m.listen.map((l) => l.port).join(" ")}`.toLowerCase().includes(q);
     const visible = rows.filter((r) => {
       if (!showAll && r.kind === "app") return false;
       if (!q) return true;
       const k = keptOf(r);
-      return `${r.command} ${r.cwd} ${r.where} ${r.ports.join(" ")} ${k?.name ?? ""}`.toLowerCase().includes(q);
+      const title = agentInfo(r)?.title ?? "";
+      return `${r.command} ${r.cwd} ${r.where} ${r.ports.join(" ")} ${k?.name ?? ""} ${title}`.toLowerCase().includes(q) || r.members.some(memberHit);
     });
     const sections = new Map<string, Row[]>();
     for (const r of visible) sections.set(r.where, [...(sections.get(r.where) ?? []), r]);
@@ -150,6 +163,7 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
     const ordered = [...sections.entries()].sort(([a, ra], [b, rb]) => rank(ra) - rank(rb) || a.localeCompare(b));
 
     const out: Item[] = [];
+    const byOldest = (a: Row, b: Row) => b.etimeSec - a.etimeSec;
     for (const [where, rs] of ordered) {
       const isApp = rs.every((r) => r.kind === "app");
       out.push({
@@ -159,28 +173,54 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
         count: rs.length,
         muted: isApp,
       });
-      const pids = new Set(rs.map((r) => r.pid));
-      const byOldest = (a: Row, b: Row) => b.etimeSec - a.etimeSec;
+      const inSection = new Set(rs.map((r) => r.pid));
       const place = (r: Row, depth: number) => {
         out.push({ type: "row", row: r, depth });
+        // Expanded (or the filter matched one of its processes): show its processes as a tree.
+        if (r.members.length && (expanded.has(r.pid) || (q && r.members.some(memberHit)))) {
+          // Tree lines: "│  " under ancestors that have more siblings below, "├─"/"└─" for the node.
+          const isLast = (i: number) => {
+            const m = r.members[i]!;
+            for (let j = i + 1; j < r.members.length && r.members[j]!.depth >= m.depth; j++)
+              if (r.members[j]!.depth === m.depth) return false;
+            return true;
+          };
+          const open: boolean[] = [];
+          r.members.forEach((m, i) => {
+            const last = isLast(i);
+            const prefix = open.slice(0, m.depth).map((o) => (o ? "│  " : "   ")).join("") + (last ? "└─ " : "├─ ");
+            open[m.depth] = !last;
+            out.push({ type: "child", row: r, m, prefix });
+          });
+        }
         rs.filter((x) => x.parentRow === r.pid).sort(byOldest).forEach((x) => place(x, depth + 1));
       };
-      rs.filter((r) => r.parentRow === undefined || !pids.has(r.parentRow)).sort(byOldest).forEach((r) => place(r, 0));
+      // Within an app: one block per starting directory.
+      const tops = rs.filter((r) => r.parentRow === undefined || !inSection.has(r.parentRow));
+      const dirs = new Map<string, Row[]>();
+      for (const r of tops) dirs.set(r.cwd, [...(dirs.get(r.cwd) ?? []), r]);
+      for (const [dir, drs] of [...dirs.entries()].sort(([a], [b]) => tildify(a).localeCompare(tildify(b)))) {
+        out.push({ type: "dir", dir, branch: dir && dir !== "/" ? gitBranch(dir) : null, count: drs.length, muted: isApp });
+        drs.sort(byOldest).forEach((r) => place(r, 0));
+      }
     }
     return out;
-  }, [mode, rows, kept, showAll, q, keptOf, liveOf]);
+  }, [mode, rows, kept, showAll, q, keptOf, liveOf, expanded]);
 
-  const selectable = useMemo(() => items.flatMap((it, i) => (it.type === "header" ? [] : [i])), [items]);
+  const selectable = useMemo(() => items.flatMap((it, i) => (it.type === "header" || it.type === "dir" ? [] : [i])), [items]);
+  const keyOf = (it: Item | undefined) => (it?.type === "row" ? it.row.pid : it?.type === "child" ? it.m.pid : undefined);
 
   // Keep the selection on the same process across refreshes.
   let pos =
     mode === "procs"
-      ? selectable.findIndex((i) => (items[i] as { row: Row }).row.pid === sel.procs)
+      ? selectable.findIndex((i) => keyOf(items[i]) === sel.procs)
       : selectable.findIndex((i) => (items[i] as { index: number }).index === sel.kept);
   if (pos < 0) pos = Math.min(lastPos.current[mode], Math.max(0, selectable.length - 1));
   lastPos.current[mode] = pos;
   const cursorItem = selectable.length ? items[selectable[pos]!] : undefined;
-  const curRow = cursorItem?.type === "row" ? cursorItem.row : cursorItem?.type === "kept" ? cursorItem.live : undefined;
+  const curChild = cursorItem?.type === "child" ? cursorItem.m : undefined;
+  const curRow =
+    cursorItem?.type === "row" || cursorItem?.type === "child" ? cursorItem.row : cursorItem?.type === "kept" ? cursorItem.live : undefined;
   const curKept = cursorItem?.type === "kept" ? cursorItem.kept : curRow ? keptOf(curRow) : undefined;
 
   const select = (p: number) => {
@@ -188,9 +228,17 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
     const it = items[selectable[clamped]!];
     if (!it) return;
     lastPos.current[mode] = clamped;
-    if (it.type === "row") setSel((s) => ({ ...s, procs: it.row.pid }));
+    const k = keyOf(it);
+    if (k !== undefined) setSel((s) => ({ ...s, procs: k }));
     if (it.type === "kept") setSel((s) => ({ ...s, kept: it.index }));
   };
+  const selectPid = (pid: number) => setSel((s) => ({ ...s, procs: pid }));
+  const setOpen = (pid: number, open: boolean) =>
+    setExpanded((e) => {
+      const n = new Set(e);
+      open ? n.add(pid) : n.delete(pid);
+      return n;
+    });
 
   // ── layout ─────────────────────────────────────────────────────────────
   const W = Math.max(60, size.w);
@@ -198,10 +246,13 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
   const listH = H - 1 /*header*/ - 1 /*gap*/ - DETAILS_H - 1 /*footer*/;
   const bodyH = listH + DETAILS_H;
 
-  // Scroll so the cursor (and its section header) stay visible.
+  // Scroll so the cursor (and the headers above it) stay visible.
   const cursorIdx = selectable[pos] ?? 0;
   let viewTop = top;
-  if (cursorIdx < viewTop) viewTop = cursorIdx > 0 && items[cursorIdx - 1]?.type === "header" ? cursorIdx - 1 : cursorIdx;
+  if (cursorIdx < viewTop) {
+    viewTop = cursorIdx;
+    while (viewTop > 0 && (items[viewTop - 1]?.type === "header" || items[viewTop - 1]?.type === "dir")) viewTop--;
+  }
   if (cursorIdx >= viewTop + listH) viewTop = cursorIdx - listH + 1;
   viewTop = Math.max(0, Math.min(viewTop, Math.max(0, items.length - listH)));
   if (viewTop !== top) queueMicrotask(() => setTop(viewTop));
@@ -214,6 +265,14 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
       const r = rowByPid(peekOverlay.pid);
       if (!r) return;
       const src = peekOverlay.source;
+      const m = peekOverlay.child ? r.members.find((x) => x.pid === peekOverlay.child) : undefined;
+      if (m) {
+        // A single process: its own log files first, else the job's terminal.
+        const cr = childRow(r, m);
+        const files = outputFiles(cr);
+        setPeekData(files.length ? peek(cr, Math.max(200, bodyH), src ?? files[0]) : peek(r, Math.max(200, bodyH), src));
+        return;
+      }
       const data = peek(r, Math.max(200, bodyH), src === TRANSCRIPT ? undefined : src);
       const a = agentInfo(r);
       if (a?.transcript) data.sources = [TRANSCRIPT, ...data.sources];
@@ -223,19 +282,23 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
     load();
     const t = setInterval(load, 2500);
     return () => clearInterval(t);
-  }, [peekOverlay?.pid, peekOverlay?.source]);
+  }, [peekOverlay?.pid, peekOverlay?.child, peekOverlay?.source]);
 
   // ── actions ────────────────────────────────────────────────────────────
-  const askKill = (r: Row) => {
-    const st = stopping.get(r.pid);
+  const askKill = (r: Row, m?: Member) => {
+    const key = m?.pid ?? r.pid;
+    const st = stopping.get(key);
     const force = !!st && Date.now() - st.at > STUCK_AFTER_MS;
-    const label = r.command.length > 40 ? r.command.slice(0, 39) + "…" : r.command;
+    const cmd = m ? m.argvCommand : r.command;
+    const label = cmd.length > 40 ? cmd.slice(0, 39) + "…" : cmd;
+    const pids = m ? m.pids : r.pids;
     setConfirm({
-      text: `${force ? "Force-kill (SIGKILL)" : "Stop"} ${label} — ${r.pids.length > 1 ? `${r.pids.length} processes` : `pid ${r.pid}`}?`,
+      text: `${force ? "Force-kill (SIGKILL)" : "Stop"} ${label} — ${pids.length > 1 ? `${pids.length} processes` : `pid ${key}`}${m ? " (just this part of the job)" : ""}?`,
       onYes: () => {
-        const n = killRow(r, force ? "SIGKILL" : "SIGTERM");
-        setStopping((s) => new Map(s).set(r.pid, { at: Date.now(), force }));
-        flash(n ? `sent ${force ? "SIGKILL" : "SIGTERM"}` : "already gone", "warn");
+        const sig = force ? "SIGKILL" : "SIGTERM";
+        const n = m ? killPids(m.pids, sig) : killRow(r, sig);
+        setStopping((s) => new Map(s).set(key, { at: Date.now(), force }));
+        flash(n ? `sent ${sig}` : "already gone", "warn");
         setTimeout(refresh, 400);
       },
     });
@@ -266,12 +329,22 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
     else go();
   };
 
-  const openWeb = (r: Row) => {
-    const pages = webPages(r, probes);
-    const pending = r.ports.some((p) => probes.get(probeKey(r, p)) === "pending");
-    if (pages.length === 1) { openUrl(pages[0]!.url); return flash(`opened ${pages[0]!.url}`); }
-    if (pages.length > 1) return setOverlay({ type: "urls", pid: r.pid });
-    if (!r.ports.length) return flash("not listening on any port", "warn");
+  const openWeb = (r: Row, m?: Member) => {
+    const listen = m ? m.listen : r.listen;
+    const pages = webPages(listen, probes);
+    if (pages.length === 1 || (m && pages.length)) {
+      openUrl(pages[0]!.url);
+      return flash(`opened ${pages[0]!.url}${pages[0]!.title ? ` — ${pages[0]!.title}` : ""}`);
+    }
+    if (pages.length > 1) {
+      // Several pages: show the job's processes and put the cursor on the first page.
+      const first = r.members.find((x) => x.listen.some((l) => isWeb(l, probes)));
+      setOpen(r.pid, true);
+      if (first) selectPid(first.pid);
+      return flash(`${pages.length} web pages — pick one (↑↓, o)`);
+    }
+    if (!listen.length) return flash("not listening on any port", "warn");
+    const pending = listen.some((l) => probes.get(probeKey(l)) === "pending");
     flash(pending ? "still checking its ports…" : "its ports don't serve web pages (API or other protocol)", "warn");
   };
 
@@ -300,8 +373,8 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
     });
   };
 
-  const copy = (r: Row) => {
-    const line = `cd ${shellPath(r.cwd)} && ${r.command}`;
+  const copy = (dir: string, cmd: string) => {
+    const line = `cd ${shellPath(dir)} && ${cmd}`;
     Bun.spawnSync(["pbcopy"], { stdin: Buffer.from(line) });
     flash(`copied: ${line}`);
   };
@@ -332,12 +405,34 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
       if (input === "/") { setFiltering(true); return; }
       if (input === "r") { refresh(); return flash("refreshed"); }
 
-      // Actions on a live process work in both tabs.
+      // Tree: → expands a job (then steps into it), ← collapses / goes back to the job.
+      if (mode === "procs" && (key.rightArrow || input === "l") && cursorItem?.type === "row" && cursorItem.row.members.length) {
+        if (!expanded.has(cursorItem.row.pid)) return setOpen(cursorItem.row.pid, true);
+        return select(pos + 1);
+      }
+      if (mode === "procs" && (key.leftArrow || input === "h")) {
+        if (cursorItem?.type === "child") { setOpen(cursorItem.row.pid, false); return selectPid(cursorItem.row.pid); }
+        if (cursorItem?.type === "row") return setOpen(cursorItem.row.pid, false);
+      }
+
+      // Actions on one process of a job.
+      if (curRow && curChild) {
+        if (input === "o") return openWeb(curRow, curChild);
+        if (input === "p") return setOverlay({ type: "peek", pid: curRow.pid, child: curChild.pid });
+        if (input === "x") return askKill(curRow, curChild);
+        if (input === "c") return copy(curChild.cwd, curChild.argvCommand);
+        if (input === "f") return doFocus(curRow);
+        if (input === " " || input === "R")
+          return flash(`this process is part of "${curRow.command}" — ${input === " " ? "keep" : "restart"} the whole job from its row (←)`, "warn");
+        return;
+      }
+
+      // Actions on a live job work in both tabs.
       if (curRow) {
         if (input === "o") return openWeb(curRow);
         if (input === "f") return doFocus(curRow);
         if (input === "p") return setOverlay({ type: "peek", pid: curRow.pid });
-        if (input === "c") return copy(curRow);
+        if (input === "c") return copy(curRow.cwd, curRow.command);
         if (input === "x") return askKill(curRow);
         if (input === "R") return restart(curRow, curKept);
       }
@@ -367,7 +462,7 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
     { isActive: !overlay },
   );
 
-  // Keys for the simple overlays (help, peek, url chooser). Forms handle their own.
+  // Keys for the simple overlays (help, peek). Forms handle their own.
   useInput(
     (input, key) => {
       if (!overlay) return;
@@ -378,16 +473,9 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
           const cur = overlay.source ? srcs.indexOf(overlay.source) : -1;
           const next = key.rightArrow ? cur + 1 : cur - 1;
           // index -1 = the terminal view (if any), then the agent conversation, then each log file
-          setOverlay({ type: "peek", pid: overlay.pid, source: next < 0 || next >= srcs.length ? undefined : srcs[next] });
+          setOverlay({ ...overlay, source: next < 0 || next >= srcs.length ? undefined : srcs[next] });
         }
         if (input === "f") { const r = rowByPid(overlay.pid); if (r) { setOverlay(null); doFocus(r); } }
-      }
-      if (overlay.type === "urls") {
-        const r = rowByPid(overlay.pid);
-        const pages = r ? webPages(r, probes) : [];
-        const n = Number(input);
-        if (n >= 1 && n <= pages.length) { openUrl(pages[n - 1]!.url); setOverlay(null); flash(`opened ${pages[n - 1]!.url}`); }
-        if (input === "a") { pages.forEach((p) => openUrl(p.url)); setOverlay(null); flash(`opened ${pages.length} pages`); }
       }
     },
     { isActive: !!overlay && overlay.type !== "keep" && overlay.type !== "edit" },
@@ -473,10 +561,10 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
       />
     );
   } else if (overlay?.type === "peek") {
-    body = <PeekView width={W} height={bodyH} row={rowByPid(overlay.pid)} data={peekData} source={overlay.source} />;
-  } else if (overlay?.type === "urls") {
     const r = rowByPid(overlay.pid);
-    body = <UrlsView width={W} height={bodyH} pages={r ? webPages(r, probes) : []} command={r?.command ?? ""} />;
+    const m = overlay.child ? r?.members.find((x) => x.pid === overlay.child) : undefined;
+    const label = m ? m.argvCommand : r ? (agentInfo(r)?.title ? `${agentInfo(r)!.harness}: ${agentInfo(r)!.title}` : r.command) : "(gone)";
+    body = <PeekView width={W} height={bodyH} label={label} data={peekData} />;
   } else if (overlay?.type === "help") {
     body = <HelpView width={W} height={bodyH} />;
   } else {
@@ -489,12 +577,18 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
             const idx = viewTop + i;
             const selected = idx === cursorIdx;
             if (it.type === "header") return <SectionHeader key={`h${idx}`} {...it} width={W} />;
+            if (it.type === "dir") return <DirHeader key={`d${idx}`} {...it} width={W} />;
             if (it.type === "row")
-              return <ProcLine key={it.row.pid} row={it.row} depth={it.depth} kept={keptOf(it.row)} selected={selected} width={W} stop={stopping.get(it.row.pid)} probes={probes} />;
+              return (
+                <ProcLine key={it.row.pid} row={it.row} depth={it.depth} kept={keptOf(it.row)} selected={selected} width={W}
+                  stop={stopping.get(it.row.pid)} probes={probes} open={expanded.has(it.row.pid) || (!!q && items[idx + 1]?.type === "child")} />
+              );
+            if (it.type === "child")
+              return <ChildLine key={`c${it.m.pid}`} row={it.row} m={it.m} prefix={it.prefix} selected={selected} width={W} probes={probes} stop={stopping.get(it.m.pid)} />;
             return <KeptLine key={`k${it.index}`} kept={it.kept} live={it.live} selected={selected} width={W} probes={probes} />;
           })}
         </Box>
-        <Details width={W} height={DETAILS_H} mode={mode} row={curRow} kept={curKept} probes={probes} />
+        <Details width={W} height={DETAILS_H} mode={mode} row={curRow} child={curChild} kept={curKept} probes={probes} open={!!curRow && expanded.has(curRow.pid)} />
       </>
     );
   }
@@ -504,12 +598,10 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
       {header}
       <Text> </Text>
       {body}
-      <Footer width={W} mode={mode} overlay={overlay?.type} confirm={confirm} status={status} filtering={filtering} row={curRow} probes={probes} />
+      <Footer width={W} mode={mode} overlay={overlay?.type} confirm={confirm} status={status} filtering={filtering} row={curRow} child={curChild} probes={probes} open={!!curRow && expanded.has(curRow.pid)} />
     </Box>
   );
 }
-
-const TRANSCRIPT = "@transcript";
 
 function agentBadge(a: AgentInfo): string {
   if (a.status === "new") return a.title ? "· new ·" : "· new";
@@ -564,6 +656,21 @@ function SectionHeader({ label, tag, count, width, muted }: { label: string; tag
   );
 }
 
+/** A starting directory inside an app section: the whole row is the path (+ git branch). */
+function DirHeader({ dir, branch, count, width, muted }: { dir: string; branch: string | null; count: number; width: number; muted: boolean }) {
+  const path = dir ? tildify(dir) : "(unknown directory)";
+  const tail = `${branch ? `  ⎇ ${branch}` : ""}${count > 1 ? `  · ${count}` : ""}`;
+  const room = Math.max(10, width - 4 - tail.length);
+  return (
+    <Text wrap="truncate">
+      <Text>   </Text>
+      <Text color={muted ? c.muted : c.dirFg} bold>{fit(path, Math.min(room, path.length), "left")}</Text>
+      {branch && <Text color={c.branch}>  ⎇ {branch}</Text>}
+      {count > 1 && <Text color={c.faint}>  · {count}</Text>}
+    </Text>
+  );
+}
+
 function columns(width: number) {
   const ports = 16, up = 6, mem = 6;
   const cwd = Math.max(14, Math.min(44, Math.round(width * 0.24)));
@@ -571,15 +678,19 @@ function columns(width: number) {
   return { ports, up, mem, cwd, cmd };
 }
 
-/** Ports, web pages first-class: `↗:3000 :3001 +3`. */
-function PortsCell({ row, probes, width, muted }: { row: Row; probes: Probes; width: number; muted?: boolean }) {
-  const toks = row.ports.map((p) => {
-    const pr = probes.get(probeKey(row, p));
-    const web = !!pr && pr !== "pending" && pr.web;
-    return { text: `${web ? "↗" : ":"}${p}`, web };
+/** Process list columns: the directory lives in the header line, so the command gets the room. */
+function procColumns(width: number) {
+  const ports = 16, up = 6, mem = 6;
+  return { ports, up, mem, cmd: width - 4 - ports - up - mem - 3 - 1 };
+}
+
+/** Ports, web pages first-class: `↗3000 :3001 +3`. */
+function PortsCell({ listen, probes, width, muted }: { listen: Listen[]; probes: Probes; width: number; muted?: boolean }) {
+  const toks = listen.map((l) => {
+    const web = isWeb(l, probes);
+    return { text: `${web ? "↗" : ":"}${l.port}`, web };
   });
-  // web ports first: they're the ones you'd open
-  toks.sort((a, b) => Number(b.web) - Number(a.web));
+  toks.sort((a, b) => Number(b.web) - Number(a.web)); // web ports first: they're the ones you'd open
   const out: typeof toks = [];
   let used = 0;
   for (let i = 0; i < toks.length; i++) {
@@ -603,33 +714,41 @@ function PortsCell({ row, probes, width, muted }: { row: Row; probes: Probes; wi
   );
 }
 
-function ProcLine(props: { row: Row; depth: number; kept?: Kept; selected: boolean; width: number; stop?: { at: number; force: boolean }; probes: Probes }) {
+const ROW_INDENT = "  "; // rows sit under their directory header
+
+function ProcLine(props: { row: Row; depth: number; kept?: Kept; selected: boolean; width: number; stop?: { at: number; force: boolean }; probes: Probes; open: boolean }) {
   const { row: r, kept, selected } = props;
   const muted = r.kind === "app"; // only visible in the "all" view
-  const col = columns(props.width);
+  const col = procColumns(props.width);
   const bg = selected ? c.selBg : undefined;
-  const indent = props.depth ? "  ".repeat(props.depth - 1) + "└ " : "";
+  const indent = ROW_INDENT + (props.depth ? "  ".repeat(props.depth - 1) + "└ " : "");
+  const toggle = r.members.length ? (props.open ? "▾ " : "▸ ") : "  ";
   const agent = agentInfo(r);
   const [prog = "", ...restArgs] = r.command === r.argvCommand ? r.displayArgv : r.command.split(/\s+/);
   // Agents: what the conversation is about beats a wall of flags.
   const rest = agent ? [agentBadge(agent), agent.title ?? ""] : restArgs;
   const progName = prog.includes("/") && !prog.startsWith(".") ? basename(prog) : prog;
   const name = kept ? `${kept.name}  ` : "";
-  const note = r.leaderGone ? `  ⤷ ${r.pids.length} left running` : "";
-  const room = col.cmd - indent.length;
+  const note = r.leaderGone ? "  ⤷ exited" : "";
+  const count = r.members.length && !props.open ? `  ${r.members.length} proc${r.members.length > 1 ? "s" : ""}` : "";
+  const room = col.cmd - indent.length - toggle.length;
   const progShown = fit(name + progName, room).trimEnd();
   const argsRoom = Math.max(0, room - progShown.length);
-  const argsText = fit(" " + rest.join(" "), Math.max(0, argsRoom - note.length)).trimEnd();
-  const pad = " ".repeat(Math.max(0, argsRoom - argsText.length - note.length));
-  const noteShown = note.slice(0, Math.max(0, argsRoom - argsText.length));
+  const tailLen = note.length + count.length;
+  const argsText = fit(" " + rest.join(" "), Math.max(0, argsRoom - tailLen)).trimEnd();
+  const tailRoom = Math.max(0, argsRoom - argsText.length);
+  const noteShown = note.slice(0, tailRoom);
+  const countShown = count.slice(0, Math.max(0, tailRoom - noteShown.length));
+  const pad = " ".repeat(Math.max(0, argsRoom - argsText.length - noteShown.length - countShown.length));
   const stuck = props.stop && Date.now() - props.stop.at > STUCK_AFTER_MS;
   const fg = muted ? c.muted : c.fg;
 
   return (
     <Text backgroundColor={bg} wrap="truncate">
       <Text color={c.accent}>{selected ? "▌" : " "}</Text>
-      <Text color={c.green}>{kept ? " ● " : "   "}</Text>
+      <Text color={c.green}>{kept ? "● " : "  "}</Text>
       <Text color={c.faint}>{indent}</Text>
+      <Text color={c.dim}>{toggle}</Text>
       {kept ? (
         <Text>
           <Text color={c.green} bold>{progShown.slice(0, Math.min(name.length, progShown.length))}</Text>
@@ -640,10 +759,9 @@ function ProcLine(props: { row: Row; depth: number; kept?: Kept; selected: boole
       )}
       <Text color={muted ? c.faint : selected ? c.fg : c.dim} italic={r.source === "history"}>{argsText}</Text>
       <Text color={c.yellow}>{noteShown}</Text>
+      <Text color={c.faint}>{countShown}</Text>
       <Text>{pad} </Text>
-      <PortsCell row={r} probes={props.probes} width={col.ports} muted={muted} />
-      <Text> </Text>
-      <Text color={muted ? c.faint : c.dim}>{fit(tildify(r.cwd), col.cwd, "left")}</Text>
+      <PortsCell listen={r.listen} probes={props.probes} width={col.ports} muted={muted} />
       <Text> </Text>
       {props.stop ? (
         <Text color={stuck ? c.red : c.yellow}>{(stuck ? "stuck" : "stop…").padStart(col.up)}</Text>
@@ -656,6 +774,50 @@ function ProcLine(props: { row: Row; depth: number; kept?: Kept; selected: boole
     </Text>
   );
 }
+
+/** One process inside an expanded job: tree-drawn, its own ports/uptime/memory. */
+function ChildLine(props: { row: Row; m: Member; prefix: string; selected: boolean; width: number; probes: Probes; stop?: { at: number; force: boolean } }) {
+  const { row: r, m, selected } = props;
+  const col = procColumns(props.width);
+  const indent = ROW_INDENT + "  ";
+  const branch = props.prefix;
+  const [prog = "", ...args] = m.displayArgv;
+  const progName = prog.includes("/") ? basename(prog) : prog;
+  // Where it runs, relative to the job's directory — only when different.
+  const rel = m.cwd && m.cwd !== r.cwd ? (m.cwd.startsWith(r.cwd + "/") ? relative(r.cwd, m.cwd) : tildify(m.cwd)) : "";
+  const where = rel ? `  @${rel}` : "";
+  const room = col.cmd - indent.length - branch.length;
+  const progShown = fit(progName, room).trimEnd();
+  const argsRoom = Math.max(0, room - progShown.length);
+  const whereShown = where.slice(0, Math.max(0, Math.min(where.length, argsRoom - 8)));
+  const argsText = fit(" " + args.map(shortArg).join(" "), Math.max(0, argsRoom - whereShown.length)).trimEnd();
+  const pad = " ".repeat(Math.max(0, argsRoom - argsText.length - whereShown.length));
+  const stuck = props.stop && Date.now() - props.stop.at > STUCK_AFTER_MS;
+  return (
+    <Text backgroundColor={selected ? c.selBg : undefined} wrap="truncate">
+      <Text color={c.accent}>{selected ? "▌" : " "}</Text>
+      <Text>  </Text>
+      <Text color={c.faint}>{indent}{branch}</Text>
+      <Text color={c.childFg}>{progShown}</Text>
+      <Text color={selected ? c.childFg : c.faint}>{argsText}</Text>
+      <Text color={c.dirFg}>{whereShown}</Text>
+      <Text>{pad} </Text>
+      <PortsCell listen={m.listen} probes={props.probes} width={col.ports} />
+      <Text> </Text>
+      {props.stop ? (
+        <Text color={stuck ? c.red : c.yellow}>{(stuck ? "stuck" : "stop…").padStart(col.up)}</Text>
+      ) : (
+        <Text color={c.faint}>{fmtUptime(m.etimeSec).padStart(col.up)}</Text>
+      )}
+      <Text> </Text>
+      <Text color={m.rssKb > 1024 * 1024 ? c.yellow : c.faint}>{fmtMem(m.rssKb).padStart(col.mem)}</Text>
+      <Text> </Text>
+    </Text>
+  );
+}
+
+/** `/very/long/node_modules/.bun/next@16/…/next` → `…/next`: keep child rows readable. */
+const shortArg = (a: string) => (a.startsWith("/") && a.length > 30 ? "…/" + basename(a) : tildify(a));
 
 function KeptLine(props: { kept: Kept; live?: Row; selected: boolean; width: number; probes: Probes }) {
   const { kept: k, live, selected } = props;
@@ -670,7 +832,7 @@ function KeptLine(props: { kept: Kept; live?: Row; selected: boolean; width: num
       <Text color={selected ? c.fg : c.dim}>{fit(commandLine(k), col.cmd - nameW - 1)}</Text>
       <Text> </Text>
       {live ? (
-        <PortsCell row={live} probes={props.probes} width={col.ports} />
+        <PortsCell listen={live.listen} probes={props.probes} width={col.ports} />
       ) : (
         <Text color={c.faint}>{fit((k.ports ?? []).map((p) => `:${p}`).join(" "), col.ports)}</Text>
       )}
@@ -701,13 +863,14 @@ function termLabel(r: Row): string {
   return "";
 }
 
-function Details(props: { width: number; height: number; mode: Mode; row?: Row; kept?: Kept; probes: Probes }) {
-  const { row: r, kept: k } = props;
+function Details(props: { width: number; height: number; mode: Mode; row?: Row; child?: Member; kept?: Kept; probes: Probes; open: boolean }) {
+  const { row: r, kept: k, child: m } = props;
   const inner = props.width - 4;
 
-  const webLine = (r: Row) => {
-    const pages = webPages(r, props.probes);
-    if (pages.length)
+  /** One process's pages in full (URL + title); a job only summarizes — the list shows the rest. */
+  const webLine = (listen: Listen[], full: boolean) => {
+    const pages = webPages(listen, props.probes);
+    if (full && pages.length)
       return (
         <Text key="web" wrap="truncate-end">
           <Text color={c.dim}>web </Text>
@@ -715,13 +878,23 @@ function Details(props: { width: number; height: number; mode: Mode; row?: Row; 
             <Text key={p.url}>
               {i > 0 && <Text color={c.faint}>  ·  </Text>}
               <Text color={c.cyan} underline>{p.url.replace(/\/$/, "")}</Text>
-              {p.title && <Text color={c.dim}> {p.title}</Text>}
+              {p.title && <Text color={c.fg}> {p.title}</Text>}
             </Text>
           ))}
           <Text color={c.dim}>   </Text><Text color={c.accent}>o</Text><Text color={c.dim}> open</Text>
         </Text>
       );
-    if (r.ports.length) return <Text key="web" wrap="truncate-end">{L("ports", r.ports.map((p) => `:${p}`).join(" "), c.dimCyan)}<Text color={c.dim}>  (no web pages)</Text></Text>;
+    if (pages.length)
+      return (
+        <Text key="web" wrap="truncate-end">
+          <Text color={c.dim}>web </Text>
+          <Text color={c.cyan}>{pages.length === 1 ? pages[0]!.url.replace(/\/$/, "") : `${pages.length} pages`}</Text>
+          {pages.length === 1 && pages[0]!.title && <Text color={c.fg}> {pages[0]!.title}</Text>}
+          <Text color={c.dim}>   </Text><Text color={c.accent}>o</Text>
+          <Text color={c.dim}>{pages.length === 1 ? " open" : props.open ? " pick one in the list" : " show them"}</Text>
+        </Text>
+      );
+    if (listen.length) return <Text key="web" wrap="truncate-end">{L("ports", listen.map((l) => `:${l.port}`).join(" "), c.dimCyan)}<Text color={c.dim}>  (no web pages)</Text></Text>;
     return <Text key="web" color={c.faint}>no listening ports</Text>;
   };
 
@@ -740,8 +913,25 @@ function Details(props: { width: number; height: number; mode: Mode; row?: Row; 
     ) : null;
 
   let lines: React.ReactNode[] = [];
-  if (props.mode === "procs" && r) {
+  if (props.mode === "procs" && r && m) {
+    lines = [
+      <Text key="cmd" wrap="truncate-end"><Text color={c.accent}>$ </Text><Text color={c.fg}>{m.argvCommand}</Text></Text>,
+      <Text key="where" wrap="truncate-end">
+        {L("in", tildify(m.cwd) || "?")}<Dot /><Text color={c.dim}>part of </Text><Text color={c.fg} bold>{r.command}</Text>
+      </Text>,
+      <Text key="stats" wrap="truncate-end">
+        {L("pid", String(m.pid))}{m.pids.length > 1 && <Text color={c.dim}> +{m.pids.length - 1} below it</Text>}<Dot />
+        {L("up", fmtUptime(m.etimeSec))}<Dot />{L("mem", fmtMem(m.rssKb))}<Dot />{L("cpu", `${m.cpu.toFixed(1)}%`)}
+      </Text>,
+      webLine(m.listen, true),
+      <Text key="note" color={c.dim}>
+        one process of a job — <Text color={c.accent}>p</Text> its output, <Text color={c.accent}>x</Text> stop just this;
+        keep / restart the whole job from its row (<Text color={c.accent}>←</Text>)
+      </Text>,
+    ];
+  } else if (props.mode === "procs" && r) {
     const o = origin(r);
+    const agent = agentInfo(r);
     lines = [
       <Text key="cmd" wrap="truncate-end"><Text color={c.accent}>$ </Text><Text color={c.fg} italic={r.source === "history"}>{r.command}</Text></Text>,
       <Text key="where" wrap="truncate-end">
@@ -751,10 +941,14 @@ function Details(props: { width: number; height: number; mode: Mode; row?: Row; 
       </Text>,
       <Text key="stats" wrap="truncate-end">
         {L("pid", r.leaderGone ? `${r.pgid} (exited)` : String(r.pid))}
-        {r.pids.length > 1 && <Text color={c.dim}> +{r.pids.length - (r.leaderGone ? 0 : 1)} processes</Text>}<Dot />
+        {r.members.length > 0 && (
+          <Text color={c.dim}> +{r.members.length} process{r.members.length > 1 ? "es" : ""}{" "}
+            {props.open ? <>(<Text color={c.accent}>←</Text> hide)</> : <>(<Text color={c.accent}>→</Text> show)</>}
+          </Text>
+        )}<Dot />
         {L("up", fmtUptime(r.etimeSec))}<Dot />{L("mem", fmtMem(r.rssKb))}<Dot />{L("cpu", `${r.cpu.toFixed(1)}%`)}
       </Text>,
-      agentInfo(r) ? <AgentLine key="agent" a={agentInfo(r)!} /> : webLine(r),
+      agent ? <AgentLine key="agent" a={agent} /> : webLine(r.listen, false),
       k ? (
         <Text key="kept" color={c.green}>● kept as "{k.name}"{k.note ? <Text color={c.dim}> — {k.note}</Text> : null}</Text>
       ) : (
@@ -780,7 +974,7 @@ function Details(props: { width: number; height: number; mode: Mode; row?: Row; 
       ) : (
         <Text key="live" color={c.dim}>○ not running — <Text color={c.accent}>⏎</Text> start at your prompt, <Text color={c.accent}>t</Text> in tmux</Text>
       ),
-      r ? (agentInfo(r) ? <AgentLine key="agent" a={agentInfo(r)!} /> : webLine(r)) : <Text key="web"> </Text>,
+      r ? (agentInfo(r) ? <AgentLine key="agent" a={agentInfo(r)!} /> : webLine(r.listen, true)) : <Text key="web"> </Text>,
       <Text key="env" wrap="truncate-end" color={c.dim}>
         {Object.keys(k.env ?? {}).length ? `env: ${Object.keys(k.env!).join(", ")}` : "no extra environment"}
       </Text>,
@@ -793,8 +987,8 @@ function Details(props: { width: number; height: number; mode: Mode; row?: Row; 
   );
 }
 
-function PeekView(props: { width: number; height: number; row?: Row; data: Peek | null; source?: string }) {
-  const { data, row } = props;
+function PeekView(props: { width: number; height: number; label: string; data: Peek | null }) {
+  const { data } = props;
   const room = props.height - 4;
   const lines = data ? data.lines.slice(-room) : [];
   const srcs = data?.sources ?? [];
@@ -802,33 +996,14 @@ function PeekView(props: { width: number; height: number; row?: Row; data: Peek 
     <Box flexDirection="column" borderStyle="round" borderColor={c.accent} paddingX={1} width={props.width} height={props.height}>
       <Text wrap="truncate-end">
         <Text color={c.accent} bold>output </Text>
-        <Text color={c.fg}>{row ? (agentInfo(row)?.title ? `${agentInfo(row)!.harness}: ${agentInfo(row)!.title}` : row.command) : "(gone)"}</Text>
+        <Text color={c.fg}>{props.label}</Text>
         <Text color={c.dim}>  —  {data ? tildify(data.title) : "loading…"}</Text>
-        {srcs.length > 0 && <Text color={c.dim}>   ←→ {srcs.length} log file{srcs.length > 1 ? "s" : ""}</Text>}
+        {srcs.length > 0 && <Text color={c.dim}>   ←→ {srcs.length} more source{srcs.length > 1 ? "s" : ""}</Text>}
       </Text>
       <Text> </Text>
       {lines.map((l, i) => (
         <Text key={i} color={c.fg} wrap="truncate-end">{l || " "}</Text>
       ))}
-    </Box>
-  );
-}
-
-function UrlsView(props: { width: number; height: number; pages: Probe[]; command: string }) {
-  return (
-    <Box flexDirection="column" borderStyle="round" borderColor={c.accent} paddingX={1} width={props.width} height={props.height}>
-      <Text><Text color={c.accent} bold>open in browser </Text><Text color={c.dim}>{props.command}</Text></Text>
-      <Text> </Text>
-      {props.pages.slice(0, 9).map((p, i) => (
-        <Text key={p.url} wrap="truncate-end">
-          <Text color={c.accent} bold> {i + 1} </Text>
-          <Text color={c.cyan}>{p.url.replace(/\/$/, "").padEnd(28)}</Text>
-          <Text color={c.fg}>{p.title ?? ""}</Text>
-          {p.status >= 400 && <Text color={c.yellow}>  ({p.status})</Text>}
-        </Text>
-      ))}
-      <Text> </Text>
-      <Text color={c.dim}> <Text color={c.accent}>1-9</Text> open  <Text color={c.accent}>a</Text> open all  <Text color={c.accent}>esc</Text> back</Text>
     </Box>
   );
 }
@@ -848,16 +1023,17 @@ function HelpView(props: { width: number; height: number }) {
       <Text> </Text>
       <Box>
         <Box flexDirection="column" width={Math.floor((props.width - 6) / 2)}>
-          {section("any running process", [
-            ["o", "open its web page in the browser (↗ ports)"],
+          {section("a job or one of its processes", [
+            ["→ / ←", "show / hide the processes of a job"],
+            ["o", "open its web page (↗ ports); a job with several: shows them"],
             ["f", "focus its terminal (tmux, Orca, Terminal, iTerm)"],
-            ["p", "peek at its recent output (←→ between log files)"],
+            ["p", "peek at its output (←→ terminal / conversation / logs)"],
             ["c", "copy `cd dir && command`"],
-            ["R", "restart: stop, then run it again (same terminal if possible)"],
             ["x", "stop it (again after 3s: force-kill)"],
           ])}
-          {section("Processes tab", [
+          {section("a job (Processes tab)", [
             ["space", "keep it"],
+            ["R", "restart: stop, then run it again (same terminal if possible)"],
             ["a", "also show app & system servers (dimmed)"],
           ])}
         </Box>
@@ -878,8 +1054,9 @@ function HelpView(props: { width: number; height: number }) {
         </Box>
       </Box>
       <Text color={c.dim}>
-        Rows marked <Text color={c.yellow}>⤷ left running</Text> are what a command left behind after it exited;
-        the name comes from your command log or the processes' environment (<Text italic>italic</Text> = guessed from shell history).
+        Grouped by app, then by the directory each job was started in (⎇ git branch). A job's processes are listed
+        under it; they can be opened, peeked at and stopped, but kept and restarted only as part of their job.
+        <Text color={c.yellow}> ⤷ exited</Text>: the command finished but left these processes running.
         Agents (codex, claude, pi) show their conversation title; p → ←→ reads the conversation; R resumes it.
       </Text>
     </Box>
@@ -898,7 +1075,7 @@ function Empty({ mode, loading, filtered }: { mode: Mode; loading: boolean; filt
 }
 
 function Footer(props: {
-  width: number; mode: Mode; overlay?: Overlay["type"]; filtering: boolean; row?: Row; probes: Probes;
+  width: number; mode: Mode; overlay?: Overlay["type"]; filtering: boolean; row?: Row; child?: Member; probes: Probes; open: boolean;
   confirm: Confirm | null; status: { text: string; tone: "ok" | "warn" | "err" } | null;
 }) {
   if (props.confirm)
@@ -912,7 +1089,12 @@ function Footer(props: {
     const color = { ok: c.green, warn: c.yellow, err: c.red }[props.status.tone];
     return <Text color={color} wrap="truncate"> {props.status.text}</Text>;
   }
-  const hasWeb = !!props.row && webPages(props.row, props.probes).length > 0;
+  const listen = props.child ? props.child.listen : props.row?.listen ?? [];
+  const hasWeb = webPages(listen, props.probes).length > 0;
+  const web = hasWeb ? ([["o", "open"]] as [string, string][]) : [];
+  const tree: [string, string][] = props.child
+    ? [["←", "back to job"]]
+    : props.row?.members.length ? [[props.open ? "←" : "→", props.open ? "hide processes" : "processes"]] : [];
   const keys: [string, string][] =
     props.overlay === "keep" || props.overlay === "edit"
       ? [["⏎", "save"], ["tab ↑↓", "fields"], ["space", "toggle env"], ["esc", "cancel"]]
@@ -923,7 +1105,9 @@ function Footer(props: {
           : props.filtering
             ? [["type", "to filter"], ["⏎", "done"], ["esc", "clear"]]
             : props.mode === "procs"
-              ? [["space", "keep"], ...(hasWeb ? [["o", "open"]] as [string, string][] : []), ["f", "focus"], ["p", "peek"], ["R", "restart"], ["x", "kill"], ["/", "filter"], ["a", "all"], ["tab", "kept"], ["?", "more"]]
+              ? props.child
+                ? [...tree, ...web, ["p", "peek"], ["x", "stop this"], ["c", "copy"], ["/", "filter"], ["?", "more"]]
+                : [...tree, ["space", "keep"], ...web, ["f", "focus"], ["p", "peek"], ["R", "restart"], ["x", "kill"], ["/", "filter"], ["a", "all"], ["tab", "kept"], ["?", "more"]]
               : [["⏎", "to prompt"], ["t", "tmux"], ["e", "edit"], ["d", "forget"], ...(props.row ? ([["R", "restart"], ["f", "focus"], ["x", "kill"]] as [string, string][]) : []), ["tab", "processes"], ["?", "more"]];
   return (
     <Text wrap="truncate">

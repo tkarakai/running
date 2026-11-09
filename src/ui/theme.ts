@@ -9,6 +9,9 @@ export const c = {
   cyan: "#7dcfff",
   dimCyan: "#4c8aa8",
   muted: "#8a7fb0", // rows only visible in the "all" view: apps & system
+  dirFg: "#89b4fa", // directory headers
+  branch: "#73daca", // git branch
+  childFg: "#a9b1d6", // processes inside a job
   yellow: "#e0af68",
   red: "#f7768e",
   magenta: "#bb9af7",

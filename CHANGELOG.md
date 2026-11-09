@@ -3,6 +3,20 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
+## 0.4.0 — 2026-11-08
+
+### Changed
+- **Jobs are trees.** A job's processes are listed under it as indented rows (`→` show,
+  `←` hide / back to the job) with their own ports, uptime, memory and working directory
+  (relative to the job's). Each can be opened (`o`), peeked at (`p` — its own log file) and
+  stopped (`x`, just that process and what's below it); keep and restart stay job-level.
+- `o` on a job with several web pages now expands it and puts the cursor on the first page,
+  instead of opening a numbered chooser (removed).
+- **Grouped by directory** within each app section: a full-width header per starting
+  directory with its git branch (`⎇`), jobs indented below. The per-row directory column is
+  gone, leaving the command more room.
+- Details pane summarizes a job's web pages instead of listing every URL.
+
 ## 0.3.0 — 2026-11-08
 
 ### Added
