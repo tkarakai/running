@@ -108,6 +108,8 @@ enum DebugChannel {
                                       "confirm": delegate.store.confirmation?.title ?? "", "error": delegate.store.lastError ?? "", "fatal": delegate.store.fatal ?? "", "hello": delegate.store.hello?.version ?? "", "kept": delegate.store.kept.map(\.name)]
             out["policy"] = ["regular", "accessory", "prohibited"][NSApp.activationPolicy().rawValue]
             out["windowVisible"] = delegate.store.windowVisible
+            out["active"] = NSApp.isActive
+            out["hotKeys"] = delegate.hotKeysRegistered
             out["menuBarImageSize"] = NSApp.windows.compactMap { ($0.contentView as? NSStatusBarButton)?.image?.size }.first.map { NSStringFromSize($0) } ?? ""
             if let w = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
                 out["frame"] = NSStringFromRect(w.frame)
@@ -123,6 +125,7 @@ enum DebugChannel {
             if let d = try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted]) { try? d.write(to: URL(fileURLWithPath: path)) }
         case "popover": delegate.showPopover()
         case "window": delegate.showWindow(select: nil, route: nil)
+        case "toggleWindow": delegate.toggleWindow() // what ⇧⌃⌥R does
         case "size":
             if let w = NSApp.windows.first(where: { $0.isVisible && $0.identifier?.rawValue == "main" }) {
                 let f = w.frame

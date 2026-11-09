@@ -152,6 +152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         windowHotKey = HotKey.shiftControlOptionR { [weak self] in self?.toggleWindow() }
     }
 
+    var hotKeysRegistered: [Bool] { [hotKey != nil, windowHotKey != nil] }
+
     /// ⇧⌃⌥R: bring the window forward, or put it away if it's already in front.
     func toggleWindow() {
         if let w = window, w.isVisible, w.isKeyWindow, NSApp.isActive { w.performClose(nil) } else {
@@ -175,11 +177,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         store.windowVisible = true
         // A regular app while the window is open: in the Dock and ⌘-Tab, so it's easy to get
         // back to after switching away.
-        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
-        NSApp.activate()
+        let wasAccessory = NSApp.activationPolicy() != .regular
+        if wasAccessory { NSApp.setActivationPolicy(.regular) }
         if w.isMiniaturized { w.deminiaturize(nil) }
         w.makeKeyAndOrderFront(nil)
+        // From a global shortcut another app is in front, and the polite NSApp.activate() can be
+        // turned down — the window would open behind it. Put it on top regardless, and insist.
+        w.orderFrontRegardless()
+        bringToFront()
+        // Right after leaving accessory mode activation can be ignored once more; retry.
+        if wasAccessory { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.bringToFront() } }
         ui.focusListTick += 1
+    }
+
+    private func bringToFront() {
+        guard !NSApp.isActive || window?.isKeyWindow != true else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
     }
 
     private func makeWindow() -> NSWindow {
@@ -281,7 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m", target: nil as AnyObject?),
             item("Zoom", #selector(NSWindow.performZoom(_:)), "", target: nil as AnyObject?),
             .separator(),
-            item("Running", #selector(openFromMenu), "r", [.command, .control, .option, .shift]),
+            item("Running", #selector(openFromMenu), "r", [.control, .option, .shift]),
         ])
         NSApp.mainMenu = main
         NSApp.windowsMenu = main.items.last?.submenu
