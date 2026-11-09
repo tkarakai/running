@@ -1,7 +1,8 @@
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { basename, relative } from "node:path";
-import { collect, gitBranch, killPids, killRow, tildify, untildify, base, type Listen, type Member, type Row } from "../procs.ts";
+import { collect, gitBranch, isAlive, killPids, killRow, tildify, untildify, unkillableReason, base, type Listen, type Member, type Row } from "../procs.ts";
+import { loadSettings, saveSettings, SORTS, type SortKey } from "../settings.ts";
 import { findKept, loadKept, matches, saveKept, sameEntry, type Kept } from "../store.ts";
 import { envChoices, prefixVars } from "../env.ts";
 import { commandLine, HANDOFF, handOff, toTmux } from "../launch.ts";
@@ -73,6 +74,8 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
   const [probes, setProbes] = useState<Probes>(new Map());
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [showAll, setShowAll] = useState(false);
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>(() => loadSettings().sort);
+  useEffect(() => saveSettings({ sort }), [sort]);
   const [filter, setFilter] = useState("");
   const [filtering, setFiltering] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
@@ -164,7 +167,19 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
     const ordered = [...sections.entries()].sort(([a, ra], [b, rb]) => rank(ra) - rank(rb) || a.localeCompare(b));
 
     const out: Item[] = [];
-    const byOldest = (a: Row, b: Row) => b.etimeSec - a.etimeSec;
+    const spec = SORTS[sort.key];
+    const dir = sort.desc ? -1 : 1;
+    // Compare jobs, groups (by their aggregate) and processes with the same key.
+    const cmpVal = (a: number | string, b: number | string) =>
+      (typeof a === "string" ? a.localeCompare(b as string) : a - (b as number)) * dir;
+    const jobVal = (r: Row) => spec.value({ rss: r.rssKb, cpu: r.cpu, age: r.etimeSec, name: agentInfo(r)?.title ?? r.command });
+    const groupVal = (rs: Row[], label: string) =>
+      spec.group === "label" ? label : spec.group === "max"
+        ? Math.max(...rs.map((r) => jobVal(r) as number))
+        : rs.reduce((sum, r) => sum + (jobVal(r) as number), 0);
+    const byKey = (a: Row, b: Row) => cmpVal(jobVal(a), jobVal(b)) || a.pid - b.pid;
+    const byOldest = byKey;
+    if (sort.key !== "started" && sort.key !== "name") ordered.sort(([a, ra], [b, rb]) => cmpVal(groupVal(ra, a), groupVal(rb, b)));
     for (const [where, rs] of ordered) {
       const isApp = rs.every((r) => r.kind === "app");
       out.push({
@@ -179,15 +194,16 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
         out.push({ type: "row", row: r, depth });
         // Expanded (or the filter matched one of its processes): show its processes as a tree.
         if (r.members.length && (expanded.has(r.pid) || (q && r.members.some(memberHit)))) {
+          const members = sortTree(r.members, (m) => spec.value({ rss: m.rssKb, cpu: m.cpu, age: m.etimeSec, name: m.argvCommand }), cmpVal);
           // Tree lines: "│  " under ancestors that have more siblings below, "├─"/"└─" for the node.
           const isLast = (i: number) => {
-            const m = r.members[i]!;
-            for (let j = i + 1; j < r.members.length && r.members[j]!.depth >= m.depth; j++)
-              if (r.members[j]!.depth === m.depth) return false;
+            const m = members[i]!;
+            for (let j = i + 1; j < members.length && members[j]!.depth >= m.depth; j++)
+              if (members[j]!.depth === m.depth) return false;
             return true;
           };
           const open: boolean[] = [];
-          r.members.forEach((m, i) => {
+          members.forEach((m, i) => {
             const last = isLast(i);
             const prefix = open.slice(0, m.depth).map((o) => (o ? "│  " : "   ")).join("") + (last ? "└─ " : "├─ ");
             open[m.depth] = !last;
@@ -200,13 +216,15 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
       const tops = rs.filter((r) => r.parentRow === undefined || !inSection.has(r.parentRow));
       const dirs = new Map<string, Row[]>();
       for (const r of tops) dirs.set(r.cwd, [...(dirs.get(r.cwd) ?? []), r]);
-      for (const [dir, drs] of [...dirs.entries()].sort(([a], [b]) => tildify(a).localeCompare(tildify(b)))) {
+      const dirOrder = ([a, ra]: [string, Row[]], [b, rb]: [string, Row[]]) =>
+        sort.key === "started" || sort.key === "name" ? tildify(a).localeCompare(tildify(b)) : cmpVal(groupVal(ra, a), groupVal(rb, b));
+      for (const [dir, drs] of [...dirs.entries()].sort(dirOrder)) {
         out.push({ type: "dir", dir, branch: dir && dir !== "/" ? gitBranch(dir) : null, count: drs.length, muted: isApp });
         drs.sort(byOldest).forEach((r) => place(r, 0));
       }
     }
     return out;
-  }, [mode, rows, kept, showAll, q, keptOf, liveOf, expanded]);
+  }, [mode, rows, kept, showAll, q, keptOf, liveOf, expanded, sort]);
 
   const selectable = useMemo(() => items.flatMap((it, i) => (it.type === "header" || it.type === "dir" ? [] : [i])), [items]);
   const keyOf = (it: Item | undefined) => (it?.type === "row" ? it.row.pid : it?.type === "child" ? it.m.pid : undefined);
@@ -286,15 +304,21 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
   }, [peekOverlay?.pid, peekOverlay?.child, peekOverlay?.source]);
 
   // ── actions ────────────────────────────────────────────────────────────
-  const askKill = (r: Row, m?: Member) => {
+  const askKill = (r: Row, m?: Member, forceNow = false) => {
     const key = m?.pid ?? r.pid;
     const st = stopping.get(key);
-    const force = !!st && Date.now() - st.at > STUCK_AFTER_MS;
+    // Already force-killed and still here: explain instead of asking again.
+    if (st?.force && Date.now() - st.at > 1500) {
+      const target = m ? m.pid : r.leaderGone ? r.pids.find((p) => p !== r.pgid && isAlive(p)) ?? r.pid : r.pid;
+      const why = unkillableReason(target);
+      return flash(why ? `pid ${target}: ${why}` : `pid ${target} is still there — it may be restarted by its parent or by launchd`, "warn");
+    }
+    const force = forceNow || (!!st && Date.now() - st.at > STUCK_AFTER_MS);
     const cmd = m ? m.argvCommand : r.command;
     const label = cmd.length > 40 ? cmd.slice(0, 39) + "…" : cmd;
     const pids = m ? m.pids : r.pids;
     setConfirm({
-      text: `${force ? "Force-kill (SIGKILL)" : "Stop"} ${label} — ${pids.length > 1 ? `${pids.length} processes` : `pid ${key}`}${m ? " (just this part of the job)" : ""}?`,
+      text: `${force ? "Force-kill (kill -9 — no chance to clean up)" : "Stop"} ${label} — ${pids.length > 1 ? `${pids.length} processes` : `pid ${key}`}${m ? " (just this part of the job)" : ""}?`,
       onYes: () => {
         const sig = force ? "SIGKILL" : "SIGTERM";
         const n = m ? killPids(m.pids, sig) : killRow(r, sig);
@@ -418,6 +442,7 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
         if (input === "o") return openWeb(curRow, curChild);
         if (input === "p") return setOverlay({ type: "peek", pid: curRow.pid, child: curChild.pid });
         if (input === "x") return askKill(curRow, curChild);
+        if (input === "X") return askKill(curRow, curChild, true);
         if (input === "c") return copy(curChild.cwd, curChild.argvCommand);
         if (input === "f") return doFocus(curRow);
         if (input === " " || input === "R")
@@ -432,11 +457,22 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
         if (input === "p") return setOverlay({ type: "peek", pid: curRow.pid });
         if (input === "c") return copy(curRow.cwd, curRow.command);
         if (input === "x") return askKill(curRow);
+        if (input === "X") return askKill(curRow, undefined, true);
         if (input === "R") return restart(curRow, curKept);
       }
 
       if (mode === "procs") {
         if (input === "a") { setShowAll((s) => !s); return flash(showAll ? "hiding app & system servers" : "showing app & system servers too"); }
+        if (input === "s") {
+          const keys = Object.keys(SORTS) as SortKey[];
+          const next = keys[(keys.indexOf(sort.key) + 1) % keys.length]!;
+          setSort({ key: next, desc: SORTS[next].desc });
+          return flash(`sorted by ${SORTS[next].label} — ${SORTS[next].dirLabel[SORTS[next].desc ? 1 : 0]}  (S flips)`);
+        }
+        if (input === "S") {
+          setSort((s) => ({ ...s, desc: !s.desc }));
+          return flash(`sorted by ${SORTS[sort.key].label} — ${SORTS[sort.key].dirLabel[sort.desc ? 0 : 1]}`);
+        }
         if (curRow && input === " ") {
           const k = keptOf(curRow);
           if (k) return flash(`already kept as "${k.name}" — edit it in the Kept tab`, "warn");
@@ -542,7 +578,14 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
       ) : mode === "procs" && showAll ? (
         <Text color={c.muted}>showing app & system servers </Text>
       ) : (
-        <Text color={c.faint}>{rows ? `v${pkg.version}  ? help ` : "scanning… "}</Text>
+        <Text>
+          {mode === "procs" && rows && (
+            <Text color={sort.key === "started" && !sort.desc ? c.faint : c.accent}>
+              {`${SORTS[sort.key].label} ${sort.desc ? "↓" : "↑"}   `}
+            </Text>
+          )}
+          <Text color={c.faint}>{rows ? `v${pkg.version}  ? help ` : "scanning… "}</Text>
+        </Text>
       )}
     </Box>
   );
@@ -602,6 +645,26 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
       <Footer width={W} mode={mode} overlay={overlay?.type} confirm={confirm} status={status} filtering={filtering} row={curRow} child={curChild} probes={probes} open={!!curRow && expanded.has(curRow.pid)} />
     </Box>
   );
+}
+
+/** Unusual process states worth a glance: zombie, stopped (Ctrl-Z), stuck in the kernel. */
+const stateLabel = (stat: string) => (stat.startsWith("Z") ? "zombie" : stat.startsWith("T") ? "paused" : stat.startsWith("U") ? "D-wait" : null);
+
+/** Re-order a tree-ordered member list so siblings follow `value`, keeping parents above children. */
+function sortTree(members: Member[], value: (m: Member) => number | string, cmp: (a: number | string, b: number | string) => number): Member[] {
+  const pids = new Set(members.map((m) => m.pid));
+  const kids = new Map<number, Member[]>();
+  const tops: Member[] = [];
+  for (const m of members) (pids.has(m.ppid) ? kids.set(m.ppid, [...(kids.get(m.ppid) ?? []), m]) : tops.push(m));
+  const out: Member[] = [];
+  const walk = (list: Member[]) => {
+    for (const m of [...list].sort((a, b) => cmp(value(a), value(b)) || a.pid - b.pid)) {
+      out.push(m);
+      walk(kids.get(m.pid) ?? []);
+    }
+  };
+  walk(tops);
+  return out;
 }
 
 function agentBadge(a: AgentInfo): string {
@@ -766,6 +829,8 @@ function ProcLine(props: { row: Row; depth: number; kept?: Kept; selected: boole
       <Text> </Text>
       {props.stop ? (
         <Text color={stuck ? c.red : c.yellow}>{(stuck ? "stuck" : "stop…").padStart(col.up)}</Text>
+      ) : stateLabel(r.stat) ? (
+        <Text color={c.red}>{stateLabel(r.stat)!.padStart(col.up)}</Text>
       ) : (
         <Text color={muted ? c.faint : c.dim}>{fmtUptime(r.etimeSec).padStart(col.up)}</Text>
       )}
@@ -807,6 +872,8 @@ function ChildLine(props: { row: Row; m: Member; prefix: string; selected: boole
       <Text> </Text>
       {props.stop ? (
         <Text color={stuck ? c.red : c.yellow}>{(stuck ? "stuck" : "stop…").padStart(col.up)}</Text>
+      ) : stateLabel(m.stat) ? (
+        <Text color={c.red}>{stateLabel(m.stat)!.padStart(col.up)}</Text>
       ) : (
         <Text color={c.faint}>{fmtUptime(m.etimeSec).padStart(col.up)}</Text>
       )}
@@ -1035,12 +1102,14 @@ function HelpView(props: { width: number; height: number }) {
             ["f", "focus its terminal (tmux, Orca, Terminal, iTerm)"],
             ["p", "peek at its output (←→ terminal / conversation / logs)"],
             ["c", "copy `cd dir && command`"],
-            ["x", "stop it (again after 3s: force-kill)"],
+            ["x", "stop it (SIGTERM; again after 3s: kill -9)"],
+            ["X", "force-kill now (kill -9)"],
           ])}
           {section("a job (Processes tab)", [
             ["space", "keep it"],
             ["R", "restart: stop, then run it again (same terminal if possible)"],
             ["a", "also show app & system servers (dimmed)"],
+            ["s / S", "sort: started, memory, CPU, name / flip direction"],
           ])}
         </Box>
         <Box flexDirection="column">
@@ -1112,8 +1181,8 @@ function Footer(props: {
             ? [["type", "to filter"], ["⏎", "done"], ["esc", "clear"]]
             : props.mode === "procs"
               ? props.child
-                ? [...tree, ...web, ["p", "peek"], ["x", "stop this"], ["c", "copy"], ["/", "filter"], ["?", "more"]]
-                : [...tree, ["space", "keep"], ...web, ["f", "focus"], ["p", "peek"], ["R", "restart"], ["x", "kill"], ["/", "filter"], ["a", "all"], ["tab", "kept"], ["?", "more"]]
+                ? [...tree, ...web, ["p", "peek"], ["x/X", "stop/kill -9 this"], ["c", "copy"], ["/", "filter"], ["?", "more"]]
+                : [...tree, ["space", "keep"], ...web, ["f", "focus"], ["p", "peek"], ["R", "restart"], ["x/X", "stop/kill -9"], ["s", "sort"], ["/", "filter"], ["tab", "kept"], ["?", "more"]]
               : [["⏎", "to prompt"], ["t", "tmux"], ["e", "edit"], ["d", "forget"], ...(props.row ? ([["R", "restart"], ["f", "focus"], ["x", "kill"]] as [string, string][]) : []), ["tab", "processes"], ["?", "more"]];
   return (
     <Text wrap="truncate">

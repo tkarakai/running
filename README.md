@@ -20,8 +20,20 @@ and start them again later exactly as you ran them.
 ```sh
 bun install
 bun run install-bin                                   # builds dist/running -> ~/.local/bin/running
-echo 'eval "$(command running init)"' >> ~/.zshrc     # lets "start" type the command for you
+echo 'eval "$(command running init)"' >> ~/.zshrc     # shell integration, see below
 ```
+
+### Shell integration
+
+`running init` prints a little zsh code (`src/init.zsh`); `eval "$(command running init)"` in
+`~/.zshrc` runs it in every new shell (`command` skips the shell function of the same name,
+so the program is called). It defines:
+
+- the **`running` shell function** — wraps the program so that "start" can `cd` your shell
+  and put a command on your prompt (a separate program can't change its parent shell);
+- the **command log** hook — records what you type, so jobs can be named and located.
+
+Shells started before the line was added don't have it: open a new terminal or `exec zsh`.
 
 ## What gets listed
 
@@ -62,9 +74,15 @@ The log is pruned to 30 days once it passes 5 MB.
 **Any job or process:** `→`/`←` show / hide a job's processes · `o` open its web page (ports marked `↗` serve HTML; a job with several shows them) · `f` focus its
 terminal (tmux, Orca, Terminal.app, iTerm2, WezTerm, kitty; others: bring the app forward) ·
 `p` peek at recent output (terminal scrollback or the log files it writes to; `←→` between them) ·
-`c` copy `cd dir && command` · `R` restart · `x` kill (again after 3s → SIGKILL)
+`c` copy `cd dir && command` · `R` restart · `x` stop (SIGTERM + SIGCONT, so paused
+processes stop too; again after 3s → kill -9) · `X` kill -9 now. A process that survives
+kill -9 gets an explanation: a **zombie** (already dead, waiting for its parent) or stuck in
+the kernel (**D-wait**). Rows also flag `paused` (Ctrl-Z) processes.
 
-**Processes:** `space` keep · `a` show app & system servers · `/` filter · `tab` Kept · `?` help
+**Processes:** `space` keep · `s` sort (started, memory, CPU, name) · `S` flip direction ·
+`a` show app & system servers · `/` filter · `tab` Kept · `?` help. Sorting applies at every
+level: apps and directories by their totals, jobs, and processes within a job; it's remembered
+in `~/.config/running/settings.json`.
 
 **Kept:** `⏎` start at your prompt · `R` restart if running · `t` start in a new tmux window · `e` edit · `d` forget
 

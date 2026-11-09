@@ -3,6 +3,21 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
+## 0.5.0 — 2026-11-08
+
+### Added
+- **Sorting** — `s` cycles started / memory / CPU / name, `S` flips the direction. Applied at
+  every level: app sections and directories by their totals, jobs, and the processes inside an
+  expanded job. Shown in the header; remembered in `~/.config/running/settings.json`.
+- **`X` — kill -9 now** (on a job or a single process), with a warning that it can't clean up.
+- Processes that survive kill -9 are explained: zombie (dead, waiting for its parent — named)
+  or stuck in the kernel. Rows flag `zombie`, `paused` (Ctrl-Z) and `D-wait` states.
+
+### Fixed
+- `x` on a paused (Ctrl-Z) process did nothing until it was resumed: SIGTERM is now followed
+  by SIGCONT.
+- README: explains what `eval "$(command running init)"` does.
+
 ## 0.4.2 — 2026-11-08
 
 ### Fixed

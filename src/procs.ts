@@ -25,6 +25,7 @@ export interface Proc {
   etimeSec: number;
   rssKb: number;
   cpu: number;
+  stat: string; // ps state: R running, S sleeping, T stopped, U uninterruptible, Z zombie (+ flags)
   comm: string; // from ps; may be truncated or a bare name
 }
 
@@ -44,6 +45,7 @@ export interface Member {
   cwd: string;
   listen: Listen[];
   tty: string;
+  stat: string;
   etimeSec: number;
   rssKb: number;
   cpu: number;
@@ -70,6 +72,7 @@ export interface Row {
   where: string; // "Orca", "tmux main:2", "Visual Studio Code", "detached"…
   term: Record<string, string>; // terminal identity: orca handle, tmux pane id, TERM_PROGRAM…
   tty: string;
+  stat: string; // the root's ps state (for an exited leader: the earliest member's)
   etimeSec: number;
   rssKb: number; // whole subtree
   cpu: number; // whole subtree
@@ -120,15 +123,15 @@ async function run(cmd: string[]): Promise<string> {
 }
 
 async function psAll(): Promise<Map<number, Proc>> {
-  const out = await run(["ps", "-axo", "pid=,ppid=,pgid=,uid=,tty=,etime=,rss=,%cpu=,comm="]);
+  const out = await run(["ps", "-axo", "pid=,ppid=,pgid=,uid=,tty=,etime=,rss=,%cpu=,stat=,comm="]);
   const map = new Map<number, Proc>();
   for (const line of out.split("\n")) {
-    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\d+)\s+([\d.]+)\s+(.*)$/);
+    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\d+)\s+([\d.]+)\s+(\S+)\s+(.*)$/);
     if (!m) continue;
     const pid = Number(m[1]);
     map.set(pid, {
       pid, ppid: Number(m[2]), pgid: Number(m[3]), uid: Number(m[4]), tty: m[5]!,
-      etimeSec: parseEtime(m[6]!), rssKb: Number(m[7]), cpu: Number(m[8]), comm: m[9]!,
+      etimeSec: parseEtime(m[6]!), rssKb: Number(m[7]), cpu: Number(m[8]), stat: m[9]!, comm: m[10]!,
     });
   }
   return map;
@@ -390,7 +393,7 @@ export async function collect(opts: { selfPid: number }): Promise<Row[]> {
       const { displayArgv, argvCommand } = argvFor(x);
       const m: Member = {
         pid: x, ppid: p.ppid, depth, displayArgv, argvCommand, cwd: procCwd(x) ?? "",
-        listen: (listen.get(x) ?? []).slice(), tty: p.tty, etimeSec: p.etimeSec, rssKb: p.rssKb, cpu: p.cpu, pids: [x],
+        listen: (listen.get(x) ?? []).slice(), tty: p.tty, stat: p.stat, etimeSec: p.etimeSec, rssKb: p.rssKb, cpu: p.cpu, pids: [x],
       };
       out.push(m);
       for (const c of (kids.get(x) ?? []).sort(byStart)) m.pids.push(...walk(c, depth + 1));
@@ -430,7 +433,7 @@ export async function collect(opts: { selfPid: number }): Promise<Row[]> {
       pid, pgid: p.pgid, kind, argv, displayArgv, argvCommand,
       command: typed?.cmd ?? argvCommand, source: typed ? "typed" : "argv", leaderGone: false,
       exe: exeOf(pid), cwd: procCwd(pid) ?? "", ports: ls.map((l) => l.port), listen: ls,
-      where, term: termOf(p.tty, env, loc.pane), tty: p.tty,
+      where, term: termOf(p.tty, env, loc.pane), tty: p.tty, stat: p.stat,
       etimeSec: p.etimeSec, rssKb: rss, cpu, pids, members: membersOf(pids, pid), parentRow: loc.parentRow, via, env,
       baseEnv: (loc.shellPid && argsOf(loc.shellPid)?.env) || {},
       shellPid: kind === "term" && interactiveShell(p.ppid) ? p.ppid : undefined,
@@ -463,7 +466,7 @@ export async function collect(opts: { selfPid: number }): Promise<Row[]> {
       exe: exeOf(first.pid), cwd: typed?.cwd ?? script?.dir ?? guessCwd(pids.map(procCwd), shell ? procCwd(shell) : null),
       ports: ls.map((l) => l.port), listen: ls,
       where: loc.where || (shell ? "terminal" : "detached"),
-      term: termOf(tty, Object.assign({}, ...pids.map((x) => argsOf(x)?.env ?? {}).reverse()), loc.pane), tty,
+      term: termOf(tty, Object.assign({}, ...pids.map((x) => argsOf(x)?.env ?? {}).reverse()), loc.pane), tty, stat: first.stat,
       etimeSec: first.etimeSec, rssKb: rss, cpu, pids, members: membersOf(pids, pgid), env,
       baseEnv: (shell && argsOf(shell)?.env) || {},
       shellPid: shell,
@@ -560,12 +563,18 @@ function guessCwd(memberCwds: (string | null)[], shellCwd: string | null): strin
 /** Kill a row: its process group (if the leader is gone) and its whole subtree, children first. */
 export function killRow(r: Row, signal: NodeJS.Signals): number {
   let n = 0;
+  const pids = [...r.pids].reverse().filter((pid) => !(r.leaderGone && pid === r.pgid));
   if (r.leaderGone) try { process.kill(-r.pgid, signal); n++; } catch {}
-  for (const pid of [...r.pids].reverse()) {
-    if (r.leaderGone && pid === r.pgid) continue;
+  for (const pid of pids) {
     try { process.kill(pid, signal); n++; } catch {}
   }
+  if (signal === "SIGTERM") resume(r.leaderGone ? [-r.pgid, ...pids] : pids);
   return n;
+}
+
+/** A stopped (Ctrl-Z, state T) process only acts on SIGTERM once it's continued. */
+function resume(pids: number[]) {
+  for (const pid of pids) try { process.kill(pid, "SIGCONT"); } catch {}
 }
 
 /** Kill a set of processes (e.g. one child of a job and its descendants), children first. */
@@ -574,7 +583,22 @@ export function killPids(pids: number[], signal: NodeJS.Signals): number {
   for (const pid of [...pids].reverse()) {
     try { process.kill(pid, signal); n++; } catch {}
   }
+  if (signal === "SIGTERM") resume(pids);
   return n;
+}
+
+/** Why a process may survive `kill -9`, from its ps state. Null if it should just die. */
+export function unkillableReason(pid: number): string | null {
+  const p = Bun.spawnSync(["ps", "-o", "stat=,ppid=", "-p", String(pid)], { stdout: "pipe" });
+  const [stat = "", ppid = ""] = p.stdout.toString().trim().split(/\s+/);
+  if (!stat) return null;
+  if (stat.startsWith("Z")) {
+    const parent = Bun.spawnSync(["ps", "-o", "comm=", "-p", ppid], { stdout: "pipe" }).stdout.toString().trim();
+    return `it's a zombie — already dead, using no memory or CPU; it goes away when its parent (pid ${ppid}${parent ? ` ${basename(parent)}` : ""}) collects it or exits`;
+  }
+  if (stat.startsWith("U") || stat.startsWith("D"))
+    return "it's stuck in the kernel (waiting on a disk, network mount or driver) — nothing can stop it until that wait ends";
+  return null;
 }
 
 export function isAlive(pid: number): boolean {
