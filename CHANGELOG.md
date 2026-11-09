@@ -14,6 +14,11 @@ the version is in `package.json` and shown in the TUI header and by `running --v
 - `running` is installed as a 0.7 MB bundled script run by your Bun (`#!/usr/bin/env bun`)
   instead of a 90 MB compiled binary — the compiled one was 99% a copy of the Bun runtime.
   Requires `bun` on your PATH.
+- Upgraded Ink (the terminal UI library) from 6 to 8; terminal size now comes from Ink's
+  `useWindowSize`.
+
+### Fixed
+- Leading/trailing spaces typed into the keep / edit form are trimmed before saving.
 
 ## 0.5.1 — 2026-11-08
 

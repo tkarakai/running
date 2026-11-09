@@ -1,4 +1,4 @@
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useInput, useWindowSize } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { basename, relative } from "node:path";
 import { collect, gitBranch, isAlive, killPids, killRow, tildify, untildify, unkillableReason, base, type Listen, type Member, type Row } from "../procs.ts";
@@ -60,13 +60,9 @@ const childRow = (r: Row, m: Member): Row => ({
 
 export function App(props: { onExit: (a: ExitAction) => void }) {
   const { exit } = useApp();
-  const { stdout } = useStdout();
-  const [size, setSize] = useState({ w: stdout.columns, h: stdout.rows });
-  useEffect(() => {
-    const on = () => setSize({ w: stdout.columns, h: stdout.rows });
-    stdout.on("resize", on);
-    return () => void stdout.off("resize", on);
-  }, [stdout]);
+  // Terminal size; re-renders on resize.
+  const { columns, rows: termRows } = useWindowSize();
+  const size = { w: columns, h: termRows };
 
   const [mode, setMode] = useState<Mode>("procs");
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -606,7 +602,7 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
         width={W}
         height={bodyH}
         onCancel={() => setOverlay(null)}
-        onSubmit={(v) => { f.save(v); setOverlay(null); }}
+        onSubmit={(v) => { f.save({ ...v, name: v.name.trim(), command: v.command.trim(), cwd: v.cwd.trim(), note: v.note.trim() }); setOverlay(null); }}
       />
     );
   } else if (overlay?.type === "peek") {
