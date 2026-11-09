@@ -2,16 +2,18 @@
 
 Settings that can't be expressed in workflow files. Apply them with `gh`.
 
-## Branch ruleset (not active yet)
+## Branch ruleset
 
 [`main-ruleset.json`](main-ruleset.json) protects `main`: no deletion or force-push, linear
 history, changes only through squash-merged pull requests, and the `CI` check must pass.
-Private-repository rulesets need GitHub Pro (or the repository moving to a paid
-organization), so it is **not applied** today — the PR-only workflow is a convention (see
-`AGENTS.md`). Once available:
+Admins can bypass it only through a pull request (`bypass_mode: pull_request`) — nobody,
+including an agent using the owner's token, can push to `main` directly. Applied (the
+repository is public, so rulesets are free). Create it, or update it after editing:
 
 ```sh
 gh api -X POST repos/tkarakai/running/rulesets --input .github/settings/main-ruleset.json
+ID=$(gh api repos/tkarakai/running/rulesets --jq '.[] | select(.name=="main") | .id')
+gh api -X PUT repos/tkarakai/running/rulesets/$ID --input .github/settings/main-ruleset.json
 ```
 
 ## Applied settings
@@ -31,4 +33,10 @@ gh api -X PUT $R/actions/permissions/selected-actions --input - <<'JSON'
 JSON
 gh api -X PUT $R/vulnerability-alerts
 gh api -X PUT $R/automated-security-fixes
+gh api -X PUT $R/private-vulnerability-reporting
+gh api -X PUT $R/actions/permissions/fork-pr-contributor-approval -f approval_policy=all_external_contributors
+gh api -X PATCH $R --input - <<'JSON'
+{"security_and_analysis": {"secret_scanning": {"status": "enabled"},
+ "secret_scanning_push_protection": {"status": "enabled"}}}
+JSON
 ```
