@@ -8,7 +8,12 @@ the version is in `package.json` and shown in the TUI header and by `running --v
 ### Development
 - Hosted on GitHub (private): pull-request workflow, CI on macOS (typecheck, tests, binary
   build) plus secret scanning and workflow linting, Dependabot, and `bun run release` for
-  tagged GitHub releases with the binary attached (as `running-X.Y.Z-darwin-arm64.tar.gz`).
+  tagged GitHub releases with the program attached (as `running-X.Y.Z-macos.tar.gz`).
+
+### Changed
+- `running` is installed as a 0.7 MB bundled script run by your Bun (`#!/usr/bin/env bun`)
+  instead of a 90 MB compiled binary — the compiled one was 99% a copy of the Bun runtime.
+  Requires `bun` on your PATH.
 
 ## 0.5.1 — 2026-11-08
 

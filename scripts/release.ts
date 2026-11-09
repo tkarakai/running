@@ -52,9 +52,8 @@ ok("tests");
 await $`bun run build`.quiet().catch(() => fail("build failed (run `bun run build`)"));
 const built = (await $`./dist/running --version`.text()).trim();
 if (built !== version) fail(`built binary reports ${built}, expected ${version}`);
-const arch = (await $`uname -m`.text()).trim() === "arm64" ? "arm64" : "x64";
-// Compressed: the binary is ~90 MB, and uploads of that size can drop mid-transfer.
-const asset = `dist/running-${version}-darwin-${arch}.tar.gz`;
+// A single JS bundle run by Bun (macOS only: it calls libSystem).
+const asset = `dist/running-${version}-macos.tar.gz`;
 await $`tar -czf ${asset} -C dist running`;
 ok(`built ${asset}`);
 

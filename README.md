@@ -19,7 +19,7 @@ and start them again later exactly as you ran them.
 
 ```sh
 bun install
-bun run install-bin                                   # builds dist/running -> ~/.local/bin/running
+bun run install-bin                                   # bundles dist/running (0.7 MB, runs with bun) -> ~/.local/bin/running
 echo 'eval "$(command running init)"' >> ~/.zshrc     # shell integration, see below
 ```
 
@@ -126,7 +126,7 @@ Versions follow semver and are released with GitHub releases:
 1. Release PR: bump `version` in `package.json` and turn `## Unreleased` in
    [`CHANGELOG.md`](CHANGELOG.md) into `## X.Y.Z — YYYY-MM-DD`; merge it.
 2. On an up-to-date `main`: `bun run release --dry-run`, then `bun run release` — tags
-   `vX.Y.Z` and publishes the GitHub release (CHANGELOG section as notes, macOS binary
+   `vX.Y.Z` and publishes the GitHub release (CHANGELOG section as notes, the bundled program
    attached).
 3. `bun run install-bin` to install it.
 
