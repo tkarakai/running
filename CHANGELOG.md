@@ -3,7 +3,7 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
-## Unreleased
+## 0.7.0 — 2026-11-09
 
 ### Added
 - **Running.app**, a desktop twin of the TUI for Apple silicon Macs on macOS 26 (Tahoe) or
