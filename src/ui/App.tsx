@@ -2,7 +2,7 @@ import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { basename, relative } from "node:path";
 import { collect, gitBranch, killPids, killRow, tildify, base, type Listen, type Member, type Row } from "../procs.ts";
-import { findKept, loadKept, matches, saveKept, type Kept } from "../store.ts";
+import { findKept, loadKept, matches, saveKept, sameEntry, type Kept } from "../store.ts";
 import { envChoices, prefixVars } from "../env.ts";
 import { commandLine, promptLine, toPrompt, toTmux } from "../launch.ts";
 import { focus, openUrl, outputFiles, peek, probe, type Peek, type Probe } from "../actions.ts";
@@ -503,7 +503,10 @@ export function App(props: { onExit: (a: ExitAction) => void }) {
           env: agent ? [] : envChoices(r.env, r.baseEnv, process.env, prefixVars(r.command)),
         },
         save: (v: FormValues) => {
-          persist([...kept, { name: v.name || prog, command: v.command, cwd: v.cwd, env: toEnv(v), note: v.note, ports: r.ports, kept: new Date().toISOString() }]);
+          const dup = kept.find((x) => sameEntry(x, { command: v.command, cwd: v.cwd }));
+          if (dup) return flash(`already kept as "${dup.name}"`, "warn");
+          const session = agent?.sessionId && v.command.includes(agent.sessionId) ? agent.sessionId : undefined;
+          persist([...kept, { name: v.name || prog, command: v.command, cwd: v.cwd, env: toEnv(v), note: v.note, ports: r.ports, session, kept: new Date().toISOString() }]);
           flash(`kept "${v.name}" ✓`);
         },
       };

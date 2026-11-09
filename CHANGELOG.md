@@ -3,6 +3,19 @@
 All notable changes to `running`. Versions follow [semver](https://semver.org);
 the version is in `package.json` and shown in the TUI header and by `running --version`.
 
+## 0.4.1 — 2026-11-08
+
+### Fixed
+- Kept entries didn't link back to their running process when the launcher added flags: a
+  kept `codex resume <id>` never matched the Orca-started `codex --no-daemon -c … resume <id>`,
+  so it showed as not kept and could be kept again and again. Matching now uses a
+  fingerprint (`src/fingerprint.ts`): agent session id first (stored as `session:` for new
+  entries), otherwise same directory (resolved paths) and the same parsed command — options
+  added by launchers, `bun dev`/`bun run dev`, full program paths and env prefixes no longer
+  break the link.
+- Keeping something already kept is refused; duplicate entries in `kept.yaml` are removed
+  on load.
+
 ## 0.4.0 — 2026-11-08
 
 ### Changed
