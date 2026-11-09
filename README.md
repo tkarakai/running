@@ -126,8 +126,9 @@ Versions follow semver and are released with GitHub releases:
 1. Release PR: bump `version` in `package.json` and turn `## Unreleased` in
    [`CHANGELOG.md`](CHANGELOG.md) into `## X.Y.Z — YYYY-MM-DD`; merge it.
 2. On an up-to-date `main`: `bun run release --dry-run`, then `bun run release` — tags
-   `vX.Y.Z` and publishes the GitHub release (CHANGELOG section as notes, the bundled program
-   attached).
+   `vX.Y.Z` and publishes the GitHub release (CHANGELOG section as notes) with two
+   downloads: the 0.7 MB bundle (needs Bun; built with the version named in the notes) and a
+   self-contained Apple-silicon binary (`bun run build:standalone`).
 3. `bun run install-bin` to install it.
 
 ## Data
